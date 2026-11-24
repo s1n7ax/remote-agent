@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Verify a finished change the way its end user would — in a real browser for web apps (Playwright MCP), in a real terminal for CLIs and TUIs, with curl against the running API for backend-only changes. Runs every test on the code before the change and after it, side by side, captures screenshots as proof, and writes an HTML report with plain-language steps and a PASS/FAIL per test, then opens it in the browser and posts it, screenshots included, as a comment on the branch's pull request, replacing the previous run's. Not the formatter/lint/unit-test validation /implement already does. Only use when the user explicitly runs the /verify command; never trigger on your own.
+description: Verify a finished change the way its end user would — in a real browser for web apps (Playwright MCP), in a real terminal for CLIs and TUIs, with curl against the running API for backend-only changes. Runs every test on the code before the change and after it, side by side, captures screenshots as proof, and renders a report with plain-language steps and a PASS/FAIL per test, as HTML and as the Markdown the verify stage submits to the ticket as proof, screenshots included. Not the formatter/lint/unit-test validation /implement already does. Only use when the ship skill's verify stage sends you here (usually as the acceptance-tester subagent); never trigger on your own.
 disable-model-invocation: true
 ---
 
@@ -13,7 +13,7 @@ Four rules hold the whole skill up. Everything below is detail.
 1. **Test as the end user, through the end user's interface.** A unit test, a code read, or an internal function call is never a substitute for using the product. If the end user clicks, you click; if they type a command, you type it.
 2. **Before and after, side by side.** Every test runs on the base and on the change. An "after" on its own cannot show that the change is what made the difference.
 3. **No proof, no PASS.** Every verdict carries a screenshot. A test you could not run is NOT RUN, never PASS.
-4. **Ask only what you cannot find out; remember what you were told.** How to run the app, which credentials to use: ask when the code, the docs and your tools cannot tell you, and save the answer so the next session does not ask again.
+4. **Ask only what you cannot find out; remember what you were told.** How to run the app, which test account to use: return the question when the code, the docs and your tools cannot tell you, and save the answer so the next run does not ask again.
 
 ## Who is the end user
 
@@ -27,7 +27,7 @@ Pick the interface from what the change touches, not from what is easiest to dri
 | A library or SDK                     | Developer using it | A tiny consumer program that uses it the way its README says, run in a `term.sh` terminal.                     |
 | Config / infra (e.g. a NixOS module) | Operator           | Apply it to a disposable target (VM, container) and use the resulting system the way an operator would.        |
 
-A change spanning several rows gets tests in each: a new endpoint plus a new page is tested in the browser and with curl. For anything else (a desktop app, a mobile app), work out who uses it and drive what they drive; ask when you cannot.
+A change spanning several rows gets tests in each: a new endpoint plus a new page is tested in the browser and with curl. For anything else (a desktop app, a mobile app), work out who uses it and drive what they drive; return the question when you cannot.
 
 A UI verdict comes from the rendered page in a browser. Never decide one with curl, a DOM query or the source. If Playwright MCP is missing or cannot start a browser, use another browser-driving tool the session has; with none, the UI tests are NOT RUN and you say why.
 
@@ -35,13 +35,13 @@ A UI verdict comes from the rendered page in a browser. Never decide one with cu
 
 ### 1. Load the goal
 
-Resolve the `<goal>` the same way `/implement` does: the name or path the user gave, else the goal under `.ship/` the current branch name starts with, else the only goal with a requirement. Several candidates → ask which, following the `questions` skill. Read the requirement: its acceptance criteria are what you test.
+The brief names the `<goal>`, the checkout, the branch and the base branch. Read the requirement, `.ship/<goal>/requirement/requirement.md`, and the decisions file: the requirement's acceptance criteria are what you test.
 
-No goal at all is fine; the user may run `/verify` on any branch. Then `<goal>` is the branch name in kebab-case, the change is the diff from the branch's base, and the tests come from the commits, the PR description, and what the user said.
+Without a requirement (a job run verifying a PR branch), `<goal>` is the branch name in kebab-case, the change is the diff from the branch's base, and the tests come from the commits, the PR description, and the brief.
 
 ### 2. Recall what you already know
 
-Before working anything out, read your saved notes for this project (see Remembering). They may already say how to start the app, which port, which test account, which seed data. Use them; do not ask again.
+Before working anything out, read your saved notes for this project (see Remembering) and every answer the brief carries. They may already say how to start the app, which port, which test account, which seed data. Use them; do not ask again.
 
 ### 3. Design the tests
 
@@ -51,7 +51,7 @@ For each test, write down what **before** and **after** should show. Usually bef
 
 ### 4. Set up before and after
 
-Never disturb the user's checkout. Make two detached worktrees outside it, in a temp or scratch directory:
+Never disturb the goal's checkout. Make two detached worktrees outside it, under `$TMPDIR`:
 
 ```sh
 base=$(git merge-base <base-branch> HEAD)   # base branch: the PR's, else the repo's default branch
@@ -59,27 +59,25 @@ git worktree add --detach <tmp>/before "$base"
 git worktree add --detach <tmp>/after  HEAD
 ```
 
-`--detach` matters: the branch is usually checked out in the user's checkout already, and git refuses to check it out twice.
+`--detach` matters: the branch is checked out in the goal's checkout already, and git refuses to check it out twice.
 
-- **Uncommitted work.** If the user's checkout has uncommitted changes, they are part of the change: apply them to `after` (`git diff HEAD --binary | git -C <tmp>/after apply`, then copy untracked files) and say so in the report.
-- **Local config.** A fresh worktree lacks gitignored files the app needs (`.env`, `*.local.*` config). Copy them from the user's checkout into both sides. They are deleted with the worktrees.
+- **Uncommitted work.** The gate leaves the checkout clean. If it has uncommitted changes anyway, they are part of the change: apply them to `after` (`git diff HEAD --binary | git -C <tmp>/after apply`, then copy untracked files) and say so in the report.
+- **Local config.** A fresh worktree lacks gitignored files the app needs (`.env`, `*.local.*` config). Copy them from the checkout into both sides. They are deleted with the worktrees.
 - **Both running at once.** Give each side its own port (`PORT=3001` / `PORT=3002`, `--port`), checking first that the port is free. Give each its own state: database file or schema, data dir, Docker Compose project name (`-p verify-before`), and for CLIs its own `HOME` / `XDG_*`. Never point either side at shared or production data.
 - **Start and wait.** Install dependencies and build in each worktree. Run servers in the background and poll the health URL or port until ready; do not just sleep.
 - **No base.** A brand-new project or file has no before. That side is "n/a, did not exist" in the report, and the test is judged on after alone.
 
-If the app needs secrets, services, or seed data you cannot find in the repo, the docs, or your notes, ask (step 5). If something cannot run locally at all, the tests that need it are NOT RUN. Never test against production without the user's explicit go-ahead.
+If the app needs secrets, services, or seed data you cannot find in the repo, the docs, your notes or the brief, return the question (step 5). If something cannot run in the sandbox at all, the tests that need it are NOT RUN. Never test against production without the user's explicit go-ahead in an answer.
 
 ### 5. When you must ask
 
 Ask only when the code, the docs, your notes and your tools cannot answer. That is typically:
 
 - **How to run or reach it.** The start command is not discoverable, or the app needs a service you cannot start.
-- **Credentials.** A login, an API token, a test account. Ask for test credentials, never a real user's.
+- **Credentials.** A login, an API token, a test account. Ask for test credentials, never a real user's; answers are stored on the ticket's card.
 - **What "correct" looks like.** The requirement does not say, and the before/after difference does not settle it.
 
-Every question passes the `questions` skill first, one at a time. Save each answer that will still hold next time (see Remembering) before carrying on.
-
-When `/ship` runs this skill in a subagent, you cannot reach the user. Stop instead, and return the questions with what each one blocks; `/ship` asks them, saves the answers, and starts you again with them.
+Every question passes the `questions` skill first. You cannot reach the user: stop, and return all the questions at once, each with what it blocks and its options (recommended first), shaped so they drop straight into a question tree. The verify stage submits them as a `follow_up` round, saves the answers (see Remembering), and starts you again with them in the brief. When no subagent is running this skill — the stage run follows it itself — submit that round with `submit_questions` yourself (`purpose: "follow_up"`) and end the run.
 
 Keep secrets out of the proof. Pass a token as an environment variable (`term.sh start <goal>-after <dir> TOKEN=...`) and type `$TOKEN`, so the screenshot shows the name, not the value. Never write a secret into the report, your notes, or a commit; refer to it by name ("the staging admin account").
 
@@ -94,10 +92,10 @@ Run the steps on **before**, then the same steps on **after**. Save screenshots 
 - Find elements with `browser_snapshot`; judge what the user sees from the screenshot.
 - Save screenshots with `browser_take_screenshot`, giving `filename` as an **absolute** path into the report directory; a relative name lands in the server's own output directory. Capture the viewport at the moment of the check. When the change is small (an icon, a border), add an element screenshot of it next to the viewport one. Use a full-page shot only when the change is below the fold.
 
-**CLI, TUI, API.** Drive a real terminal with `scripts/term.sh`, in this skill's directory (`~/.agents/skills/verify/` or `~/.claude/skills/verify/`). It runs a clean bash with a `$ ` prompt on a private tmux server, so the user's own tmux is untouched, and renders the screen to PNG with `freeze`. Other runs may share that server, so prefix session names with the goal.
+**CLI, TUI, API.** Drive a real terminal with `scripts/term.sh`, in this skill's directory (`~/.claude/skills/verify/` under Claude Code, `~/.agents/skills/verify/` under pi). It runs a clean bash with a `$ ` prompt on a private tmux server, so no other tmux is touched, and renders the screen to PNG with `freeze`. Other runs may share that server, so prefix session names with the goal.
 
 ```sh
-T=~/.agents/skills/verify/scripts/term.sh
+T=~/.claude/skills/verify/scripts/term.sh   # pi: ~/.agents/skills/verify/scripts/term.sh
 $T start <goal>-before <tmp>/before HOME=<tmp>/home-before  # clean shell in a dir, extra env optional
 $T type  <goal>-before 'todo add milk'                      # type a command, press Enter
 $T wait  <goal>-before                                      # until the screen stops changing
@@ -126,13 +124,13 @@ Stop every server and `term.sh` session you started, close the browser, and remo
 
 ### 8. Write the report
 
-The report is an HTML page that opens in the user's browser, with each test's before and after screenshots side by side. Never write it as Markdown, and never write the HTML by hand: describe the run as JSON and let `scripts/report.py` (next to `term.sh`) render it, so every report looks the same whichever agent wrote it.
+The report is rendered, never hand-written: describe the run as JSON and let `scripts/report.py` (next to `term.sh`) render it, so every report looks the same whichever agent wrote it. It writes an HTML page (before and after side by side) and the Markdown the ticket shows as proof.
 
 1. Write `.ship/<goal>/verify/<n>-report.json`. Screenshot paths in it are relative to `.ship/<goal>/verify/`.
-2. Run `~/.agents/skills/verify/scripts/report.py .ship/<goal>/verify/<n>-report.json` (it needs `python3`; on Nix without it, run it through `nix shell nixpkgs#python3 --command python3`). It writes `<n>-report.html` next to the JSON, prints the result line, and opens the page in the browser.
+2. From the checkout, run `<skills>/verify/scripts/report.py` (`<skills>` is `~/.claude/skills` under Claude Code, `~/.agents/skills` under pi) on `.ship/<goal>/verify/<n>-report.json` (it needs `python3`; on Nix without it, run it through `nix shell nixpkgs#python3 --command python3`). It writes `<n>-report.html` and `<n>-report.md` next to the JSON, and prints the Markdown's path, the result line, and every file the proof needs, relative to the checkout.
 3. If it lists problems instead (a PASS without screenshots on both sides, a FAIL or NOT RUN without a `why`, a screenshot path that does not exist), fix them and run it again: take the missing screenshot or correct the path; a PASS you cannot prove is NOT RUN.
 
-Each run gets its own number; earlier reports are never edited. `.ship/` is local working state, never committed: create `.ship/.gitignore` containing `*` if it is missing. The report holds screenshots of the user's app: the PR comment of step 9 is the only place it goes beyond this machine.
+Each run gets its own number; earlier reports are never edited. `.ship/` is local working state, never committed: create `.ship/.gitignore` containing `*` if it is missing. The report holds screenshots of the app: the ticket's proof is the only place it goes beyond the sandbox, and the app posts its summary to the PR.
 
 ```json
 {
@@ -173,33 +171,15 @@ Each run gets its own number; earlier reports are never edited. `.ship/` is loca
 - **Steps** are plain user actions, one per entry, with no implementation detail: "Click Settings", "Run `todo add milk`", "Send `GET /users/42` with the admin token". The last step is the check, with the old behaviour in parentheses when it changed. Backticks render as code.
 - **Setup** (each side's `setup`, plus `notes`) is what a reader needs to reproduce the run: start command, port, state dir, uncommitted changes applied, copied local config.
 
-### 9. Post it on the PR
+### 9. Finish
 
-Post the report on the branch's pull request, so whoever reviews it sees the results and the screenshots without this machine. Run from the checkout:
+Reply with: the result line, the table of tests with verdicts, the path to `<n>-report.md`, the files `report.py` listed, and one line per FAIL or NOT RUN saying what went wrong or what blocked it. Add any fact worth remembering that you learned (see Remembering).
 
-```sh
-~/.agents/skills/verify/scripts/publish.py .ship/<goal>/verify/<n>-report.json
-```
-
-It checks the JSON as `report.py` does, finds the open PR of the current branch (`--pr <number|url>` names another), uploads this run's screenshots to the PR's repository under the ref `refs/verify/pr-<number>` (not a branch, so it stays out of the branch list, clones and the diff), posts the report as a comment, and deletes every earlier `/verify` comment on that PR. The PR only ever shows the latest run: after a requirement changes and you verify again, the new comment replaces the old one. It prints the comment's URL.
-
-- **No open PR** → it says so and posts nothing. Say so in the chat report; running it again once the PR exists posts this report.
-- **It fails** (no `gh`, not logged in, no write access) → report its error. The local report stands; the run is not redone.
-- **Visibility.** The screenshots become as visible as the PR: public on a public repository. One more reason no secret may appear in them.
-
-When `/ship` is driving this skill, skip this step; `/ship` posts the final report once the PR exists.
-
-### 10. Finish
-
-Report in chat: the result line, the table of tests with verdicts, the path to `<n>-report.html`, the PR comment's URL (or why there is none), and one line per FAIL or NOT RUN saying what went wrong or what blocked it. If `report.py` said it could not open the browser, ask the user to open that path.
-
-When `/ship` is driving this skill, run `report.py` with `--no-open` and stop after the chat report; `/ship` opens the final report and the PR.
-
-Otherwise `/verify` is the last step of the workflow. When everything passed, tell the user the change is verified and the workflow is complete. Otherwise, name what failed or was not run; fixing it is a new piece of work, not part of this skill.
+The verify stage hands the Markdown and those files to the app with `submit_proof(report_markdown, files)`. When no subagent is running this skill, do that yourself.
 
 ## Remembering
 
-Whenever the user tells you something you could not work out yourself (how to start the app, which port or URL, which test account, how to seed data, what a page is called, that a flow needs a feature flag), save it so the next `/verify` on this project starts with it. Save it as soon as you have the answer, not at the end.
+Whenever an answer tells you something you could not work out yourself (how to start the app, which port or URL, which test account, how to seed data, what a page is called, that a flow needs a feature flag), save it so the next `/verify` on this project starts with it. Save it as soon as you have the answer, not at the end. A subagent that may not write outside `.ship/<goal>/verify/` returns the fact in its reply instead, and the verify stage saves it.
 
 - Use the agent's native persistent memory when it has one (Claude Code's memory directory, for example): one fact per entry, naming the project.
 - Otherwise append to `~/.agents/verify-notes/<project>.md`, where `<project>` is the repo's directory name.
@@ -208,11 +188,11 @@ Whenever the user tells you something you could not work out yourself (how to st
 
 ## Never
 
-- Never run unless the user explicitly invoked this skill or `/ship`.
-- Never ask a question outside the `questions` skill.
+- Never run unless the ship skill's verify stage sent you here.
+- Never ask a question outside the `questions` skill, or ask in the chat; questions go back to the stage run, and from there to the card.
 - Never decide a verdict from code, unit tests, or internal calls instead of the end user's interface.
 - Never mark PASS without a screenshot you looked at, or claim a test ran that did not.
 - Never test only the after side.
-- Never touch the user's checkout, shared data, or production without explicit permission.
+- Never modify the goal's checkout, shared data, or production without explicit permission.
 - Never write a secret into the report, your notes, a screenshot, or a commit.
 - Never fix the code; report and stop.

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Render a /verify report from JSON to HTML, and open it in the browser.
+"""Render a /verify report from JSON to HTML and Markdown, for the ticket's proof.
 
 Usage:
-  report.py [--no-open] <dir>/<n>-report.json
+  report.py <dir>/<n>-report.json
 
-Writes <dir>/<n>-report.html next to the JSON, prints its path and the
-result line, then opens it in the default browser unless --no-open is given.
-Screenshot paths in the JSON are relative to <dir>; every one must exist.
-Exits 1 with every problem listed when the JSON breaks a rule, so they can
-all be fixed in one pass.
+Run it from the project's checkout. Writes <dir>/<n>-report.html and
+<dir>/<n>-report.md next to the JSON, then prints the Markdown's path, the
+result line, and every file the proof needs (the HTML page and each
+screenshot), as paths relative to the current directory. Those are what the
+stage run hands to the app's submit_proof(report_markdown, files): the
+Markdown links its screenshots by the same relative paths. Screenshot paths
+in the JSON are relative to <dir>; every one must exist. Exits 1 with every
+problem listed when the JSON breaks a rule, so they can all be fixed in one
+pass.
 
 JSON shape (`date` is optional; it defaults to the JSON file's date):
 
@@ -51,8 +55,6 @@ import html
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 
 VERDICTS = {
@@ -332,39 +334,76 @@ def render(report, number):
 """
 
 
-def open_in_browser(path):
-    """Open the page in the default browser; return a message saying how it went."""
-    if sys.platform == "darwin":
-        command = ["open", path]
-    elif shutil.which("xdg-open") and (
-        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
-    ):
-        command = ["xdg-open", path]
-    else:
-        return f"No display or opener here; open {path} in a browser yourself."
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
-        code = process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        return "Opened in the browser."
-    if code != 0:
-        return f"{command[0]} failed (exit {code}); open {path} in a browser yourself."
-    return "Opened in the browser."
+def md_inline(text):
+    """One line of Markdown: newlines folded, pipes escaped for tables."""
+    return " ".join(str(text).split()).replace("|", "\\|")
+
+
+def md_side(info, link):
+    """One cell of the before/after table."""
+    if info is None:
+        return "_n/a: did not exist before the change._"
+    images = [f"![screenshot]({link(image)})" for image in as_list(info.get("images"))]
+    parts = images or ["_No screenshot._"]
+    if info.get("note"):
+        parts.append(md_inline(info["note"]))
+    return "<br>".join(parts)
+
+
+def md_text(name, info):
+    """A side's text dump as a fenced block, or nothing."""
+    if not info or not info.get("text"):
+        return []
+    fence = "~~~~"
+    while fence in info["text"]:
+        fence += "~"
+    return [f"**{name} (text):**", "", fence, info["text"], fence, ""]
+
+
+def render_markdown(report, number, link):
+    """The whole report as Markdown, screenshots linked through link()."""
+    tests = report["tests"]
+    counts = result_counts(tests)
+    lines = [f"# Verification {number} — {report['goal']}", ""]
+    for side in ("before", "after"):
+        info = report[side]
+        ref = f"`{info['ref']}`" + (f" ({info['sha']})" if info.get("sha") else "")
+        if info.get("at"):
+            ref += f" at {info['at']}"
+        lines.append(f"- **{side.capitalize()}:** {ref}")
+    lines += [f"- **Date:** {report['date']}", "", f"**Result:** {result_line(counts)}", ""]
+    lines += ["| # | Test | Verdict |", "| - | ---- | ------- |"]
+    for index, test in enumerate(tests, 1):
+        verdict = normalise(test["verdict"])
+        lines.append(f"| {index} | {md_inline(test['title'])} | {VERDICTS[verdict][1]} {verdict} |")
+    lines.append("")
+    for index, test in enumerate(tests, 1):
+        verdict = normalise(test["verdict"])
+        lines += [f"## {index}. {md_inline(test['title'])} — {VERDICTS[verdict][1]} {verdict}", ""]
+        if test.get("why"):
+            label = "What happened" if verdict == "FAIL" else "Why"
+            lines += [f"**{label}:** {md_inline(test['why'])}", ""]
+        lines += [f"{step_number}. {md_inline(step)}" for step_number, step in enumerate(as_list(test.get("steps")), 1)]
+        lines += ["", "| Before | After |", "| ------ | ----- |"]
+        lines += [f"| {md_side(test.get('before'), link)} | {md_side(test.get('after'), link)} |", ""]
+        lines += md_text("Before", test.get("before")) + md_text("After", test.get("after"))
+    setup = [
+        f"- **{side.capitalize()}:** {md_inline(report[side]['setup'])}"
+        for side in ("before", "after")
+        if report[side].get("setup")
+    ]
+    setup += [f"- {md_inline(note)}" for note in as_list(report.get("notes"))]
+    if setup:
+        lines += ["## Setup", ""] + setup + [""]
+    return "\n".join(lines)
 
 
 def main(argv):
-    """Parse arguments, render the report, and open it."""
-    args = [arg for arg in argv if arg != "--no-open"]
-    if len(args) != 1 or args[0] in ("-h", "--help"):
+    """Parse arguments, check the report, and render it."""
+    if len(argv) != 1 or argv[0] in ("-h", "--help"):
         print(__doc__.split("JSON shape")[0].strip(), file=sys.stderr)
         return 2
-    json_path = os.path.abspath(args[0])
+    json_path = os.path.abspath(argv[0])
     match = re.fullmatch(r"(\d+)-report\.json", os.path.basename(json_path))
     if not match:
         fail(
@@ -386,15 +425,31 @@ def main(argv):
     report.setdefault(
         "date", datetime.date.fromtimestamp(os.path.getmtime(json_path)).isoformat()
     )
+    number = match.group(1)
 
-    html_path = os.path.join(base_dir, f"{match.group(1)}-report.html")
+    def link(image):
+        """A screenshot's path relative to where the proof is submitted from."""
+        return os.path.relpath(os.path.join(base_dir, image))
+
+    html_path = os.path.join(base_dir, f"{number}-report.html")
     with open(html_path, "w", encoding="utf-8") as handle:
-        handle.write(render(report, match.group(1)))
+        handle.write(render(report, number))
+    md_path = os.path.join(base_dir, f"{number}-report.md")
+    with open(md_path, "w", encoding="utf-8") as handle:
+        handle.write(render_markdown(report, number, link))
 
-    print(html_path)
+    files = [os.path.relpath(html_path)]
+    for test in report["tests"]:
+        for side in ("before", "after"):
+            for image in as_list((test.get(side) or {}).get("images")):
+                if link(image) not in files:
+                    files.append(link(image))
+
+    print(os.path.relpath(md_path))
     print(f"Result: {result_line(result_counts(report['tests']))}")
-    if "--no-open" not in argv:
-        print(open_in_browser(html_path))
+    print("Files:")
+    for path in files:
+        print(f"  {path}")
     return 0
 
 
