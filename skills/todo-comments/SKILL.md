@@ -10,6 +10,8 @@ description: Use whenever writing or requested to add a TODO, FIXME, or HACK mar
 1. Create an issue in the project's tracker (GitHub, Jira, Linear, etc.) for the work first
 2. Write the TODO as a doc comment (`/** */`, `"""..."""`, `///`, or the language equivalent) with the issue URL on the next line
 
+In a remote-agent stage run you cannot create issues: the app's tools read and comment on the ticket's issue, but open no new one. Write the TODO with a clearly marked placeholder on the issue line (`Issue: needed — <one-line title>`), and list every placeholder under "Issues to create" in the `stage_done` summary, so the user creates them and fills in the URLs before merging. Never link the ticket's own issue: it closes when the PR merges.
+
 ## Why
 
 A TODO without a tracked issue is almost always a TODO forever — nobody greps through source to find them. Linking to an issue puts the context (why it matters, priority, owner) somewhere searchable and actionable.

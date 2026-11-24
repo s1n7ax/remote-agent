@@ -20,7 +20,7 @@ Run the selected tier's workflow, then apply the requested `--fix` and/or `--com
 
 ### Phase 0 — Establish review scope
 
-1. Resolve the explicit target first. For a change request or merge request, use available repository-host tools when possible. For a branch, commit range, or path, inspect the relevant repository state directly.
+1. Resolve the explicit target first. For a change request or merge request, use available repository-host tools when possible; in a remote-agent run there are none that read diffs, but every PR branch is already fetched, so review `origin/<base>...origin/<head>` (the app's `list_pulls()` gives the head branch). For a branch, commit range, or path, inspect the relevant repository state directly.
 2. If no target is supplied, compare the current branch with its configured upstream or an appropriate project base branch. Use the available repository metadata to choose the base; do not assume a particular branch name when another is clearly configured.
 3. Include uncommitted changes in scope when present. In a Git repository, inspect the base-to-HEAD diff and the working-tree diff (including staged and unstaged changes as appropriate). If the selected committed range is empty, still check for working-tree changes.
 4. Treat the resulting diff as the primary scope. Read surrounding code as needed to verify behavior. For explicit path targets, focus the review on that path and its relevant changes.
@@ -159,4 +159,4 @@ After reviewing the findings, apply valid fixes directly to the working tree. Fi
 
 If the target is a hosted code-review request and a compatible provider integration is available, publish each finding as an inline comment when supported. If only general review comments are supported, post a consolidated comment containing each finding's file, line, issue, and suggested fix. Include a suggestion patch only when it fully and safely resolves the issue.
 
-If the target is not a hosted review request, or no compatible integration is available, do not pretend comments were posted. Report the findings normally and briefly state why comment posting was skipped. Use the platform's available tools or CLI rather than assuming a specific hosting provider or command.
+If the target is not a hosted review request, or no compatible integration is available, do not pretend comments were posted. Report the findings normally and briefly state why comment posting was skipped. Use the platform's available tools rather than assuming a specific hosting provider or command. In a remote-agent run the only one is the app's `comment(body)` tool, which posts one consolidated comment; inline comments are not available there. A review subagent never posts; it returns the findings to the run that dispatched it.

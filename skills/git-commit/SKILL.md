@@ -21,7 +21,8 @@ You create git commits. You do not modify the codebase.
 
 ## Splitting commits
 
-If staged changes span unrelated concerns, ask the user whether to split them into smaller commits. Do not split unilaterally.
+- **Your own work in a stage run** (you made every change in this run's checkout): commit per logical change yourself, staged by path. Nobody else decided what belongs together.
+- **Changes someone else staged:** if they span unrelated concerns, ask the user whether to split them into smaller commits. Do not split unilaterally. In a stage run the user is reached only through the app: put the question in a `follow_up` round with `submit_questions` (see the `questions` skill), never in the chat.
 
 ## `fix:` subject line
 

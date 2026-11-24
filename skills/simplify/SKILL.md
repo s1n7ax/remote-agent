@@ -17,14 +17,14 @@ Identify the code to review:
 - If a target is provided, review that target.
 - Otherwise, inspect the current changes using the relevant version-control diff.
 - Include uncommitted changes when present.
-- If no changes are available, ask for a target or identify a reasonable scope from the current context.
+- If no changes are available, identify a reasonable scope from the current context; with none, report that there is nothing to simplify and stop.
 
 Locate the relevant goal documentation under `.ship/<goal>/`:
 
 - Requirement: `.ship/<goal>/requirement/requirement.md`
 - Decisions: `.ship/<goal>/decisions/decisions.md` (absent when nothing needed recording)
 
-Determine the applicable goal from the target, changed files, branch context, or surrounding discussion. If multiple goals are plausible, ask for clarification rather than guessing — following the `questions` skill. When running as a subagent that cannot ask, stop and report the ambiguity instead.
+Determine the applicable goal from the target, changed files, branch context, or the brief (in a remote-agent run the brief names it). If multiple goals are plausible, stop and report the ambiguity rather than guessing; you cannot reach the user, and the run that dispatched you decides whether it becomes a question.
 
 Read both documents before making changes. If the requirement is missing, or either document is ambiguous, identify the limitation and avoid assuming undocumented requirements or architectural decisions.
 
