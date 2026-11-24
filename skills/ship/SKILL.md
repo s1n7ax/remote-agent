@@ -1,117 +1,156 @@
 ---
 name: ship
-description: Drive the whole workflow — /requirement, /implement, independent verification, /verify's end-user tests, and the PR — in one session, stopping for the user only where their decision is needed. Run with no argument to pick one of the unfinished local goals or open agent:ship GitHub issues; parallel runs never take the same task. Pass --critical to add a requirement-vs-implementation check. Asking for prototypes means: build a few, the user picks one, and the pick ships. Only use when the user explicitly runs the /ship command; never trigger on your own.
+description: The stage guide for the remote-agent board's /ship flow. Each ticket moves through explore → design → build → (CI, run by the app) → fix → verify, and every stage is a separate agent run started by the app; this skill says exactly what each run does, which app MCP tools it calls, and that it ends with stage_done. Also covers scheduled job runs. Only use when a stage run's prompt sends you here; never trigger on your own.
 disable-model-invocation: true
 ---
 
 # Ship
 
-This skill is the conductor. It runs `/requirement` and `/implement` back to back, adds independent checks after them, tests the result as its end user would with `/verify`, and opens the PR only after the final validation and `/verify` pass. `/implement` runs in this session, so its questions go straight to the user and each fix is made where the code was read; its review and simplify passes, and every check after it, run in fresh subagents. The user is pulled in only for decisions that are theirs: requirement questions, `/implement`'s questions, and failures that retries could not fix.
+This skill is the conductor, split into stages. The app — not you — drives the ticket: it starts one run per stage, waits for the user's answers, waits for CI, and starts the next run. Each run does one stage, hands its results to the app through the app's MCP tools, and ends with `stage_done`. The user is pulled in only for decisions that are theirs, and only through question rounds on the ticket's card.
 
-Usage: `/ship [--critical] [<fuzzy requirement> | <goal> | #<issue>]`
+The run's first message names the stage and gives its context (see [STAGES.md](./STAGES.md) for the exact contract). Find your stage below and follow it in full.
 
-When the user asks for prototypes — in the argument or at any point in the run — see Prototypes below.
+Six rules hold the whole skill up. Everything below is detail.
 
-Five rules hold the whole skill up. Everything below is detail.
-
-1. **The stage skills do the work.** `/ship` never re-implements a stage. Each stage — or the subagent running it — reads its skill file and follows it in full, except where this skill overrides the handoff.
-2. **Checks run in fresh subagents.** A checker never saw how the work was done. Its only inputs are the documents and the code, and the requirement is its source of truth. It reports; it never fixes.
-3. **Only this session spawns subagents and talks to the user.** Subagents cannot reliably start their own, and cannot reach the user, so every dispatch and every question runs here, in the main session.
-4. **No PR before the final validation and `/verify` pass.**
-5. **One task per run, in its own worktree.** Several `/ship` runs may share a repository, so each claims its task before touching it and builds it in the goal's own git worktree. Two runs never work on one task, and never switch branches under each other.
+1. **One stage per run, then `stage_done`.** Do exactly your stage's work, call its tools, and end with `stage_done(summary)`. Never start the next stage's work; a new run does it.
+2. **The stage skills do the work.** This skill never re-implements a stage. Each stage — or the subagent running it — reads its skill file and follows it in full, except where this skill overrides it.
+3. **Checks run in fresh subagents.** A checker never saw how the work was done. Its only inputs are the documents and the code, and the requirement is its source of truth. It reports; it never fixes.
+4. **The user is reached only through `submit_questions`.** No chat, no waiting for a reply. A run that needs the user submits a round and ends.
+5. **GitHub only through the app.** You hold no GitHub credential. Pushing, PRs, CI, issues and comments go through the app's MCP tools; nothing else can reach GitHub, so never try.
+6. **Never merge.** There is no merge tool, and there never will be. Only the user merges, from the app, after review. Never try another way.
 
 ## The pipeline
 
 ```
-1. requirement      main session, with the user
-2. implement        main session; review and simplify in subagents
-   ↳ prototypes     only when asked, after Decide; the user picks one
-   ↳ gate           main session, after every code change
-3. impl check       [--critical] subagent
-4. final validation always, subagent
-5. verify           always, subagent
-6. PR               main session
+explore   run      read, build the requirement tree       → round 1 → user answers
+design    run      requirement + glossary/ADRs, decisions  → round 2 → user answers
+                   ↳ prototypes, only when asked
+build     run      implement, validate, review, fix, simplify, push, draft PR
+ci        app      waits for CI — no agent runs
+fix       run      only on red CI or a merge conflict; push → ci again (max 2)
+verify    run      final validation + /verify, proof → app marks the PR ready → user merges
+job       run      a scheduled job's prompt, once
 ```
 
-## Picking a task
+Any stage may need the user again: it submits a `follow_up` round and ends, and the app starts the same stage again once the round is answered.
 
-When the argument holds no requirement, goal or issue (`--critical` alone counts as none), offer the work that is waiting and let the user pick one:
+## The run's world
 
-1. Run `~/.agents/skills/ship/scripts/tasks.py list` (Claude Code: `~/.claude/skills/ship/scripts/tasks.py`). It prints, numbered, the unfinished goals under `.ship/` (no open or merged PR from the goal's branch yet) and the open GitHub issues labelled `agent:ship` (no open or merged PR closes them yet), each with how far it got. Then it prints the tasks other agents hold, and any source it could not read.
-2. Show the list as printed, then ask which task to work on, following the `questions` skill: with up to 3 tasks, one option per task in the ask-question tool; with more, in plain text, answered with the task's number. Ask even when only one task is listed: which work starts is the user's call. With none, say there is nothing to ship, and stop.
-3. Claim the pick (see below). When another agent claimed it while the user was choosing, say so, list again, and ask again.
+- **The checkout.** The run's working directory is the project's checkout, already on the goal branch, already fetched from `origin` (so `origin/<base>` is current). The app made it, owns it, and keeps it for every stage of this ticket. Never create another clone, and never switch the checkout to another branch except as a stage below says.
+- **The goal's directory.** `.ship/<goal>/` in the checkout holds the ticket's working state. `.ship/` is never committed: create `.ship/.gitignore` containing `*` if it is missing. Before each run the app writes the latest documents into it — `requirement/requirement.md`, `decisions/decisions.md`, and each answered round as `rounds/<n>.json` — and keeps what earlier runs left there (`code-review/`, `verification/`, `verify/`, `prototypes/`). The app's copy is the source of truth: when you change a document, write the file and submit it again.
+- **Skills.** `<skills>` is `~/.claude/skills` under Claude Code and `~/.agents/skills` under pi. The stage skills are not model-invocable, so do not call them through a skill tool: read `<skills>/<name>/SKILL.md` and follow it.
+- **Messages.** The user may send a message into a live run. It is the user speaking: follow it, unless it breaks a rule in this skill's Never list; then say so in the summary.
+- **Resuming.** A stage can run again — after a `follow_up` round, a retry, or an account switch. Read the checkout and `.ship/<goal>/` first; never redo a finished step the state shows (commits, review files, reports), and never re-ask what a round already answered.
 
-Never offer a task listed as taken. When the user asks for one anyway, say which agent holds it, and claim it with `--force` only once they confirm.
+## App MCP tools
 
-## Claiming the task
+| Tool                                 | Used by             | Does                                                                         |
+| ------------------------------------ | ------------------- | ---------------------------------------------------------------------------- |
+| `submit_questions(tree)`             | any                 | posts a question round to the card (`questions` skill); the ticket waits      |
+| `submit_requirement(markdown)`       | design, build       | stores the requirement on the ticket; replaces the previous one              |
+| `submit_decisions(markdown)`         | design, build       | stores the decisions file on the ticket; replaces the previous one           |
+| `upload_artifact(path)`              | design, verify      | stores a file (a screenshot) and returns its artifact id                     |
+| `submit_prototypes(list)`            | design              | posts the prototypes, with screenshots and preview commands, to the card     |
+| `start_preview(command, port)`       | design              | serves one prototype on the tailnet preview URL (one at a time)              |
+| `submit_proof(report_markdown, files)` | verify            | attaches the `/verify` report and its screenshots to the ticket              |
+| `push_branch()`                      | build, fix, verify, job | pushes the checked-out branch to `origin`; refuses the default branch    |
+| `open_pr(title, body, draft)`        | build               | opens the ticket's PR from the goal branch                                   |
+| `update_pr(body)`                    | verify              | replaces the PR description                                                  |
+| `ci_status()`, `ci_logs(check)`      | fix, job            | reads the checks on the branch's head, and one check's log                   |
+| `get_issue()`, `comment(body)`       | explore, any        | reads the ticket's issue; comments on it                                     |
+| `list_pulls()`                       | job                 | lists the project's open PRs                                                 |
+| `stage_done(summary)`                | every run, last     | ends the stage; the summary goes on the card                                 |
 
-Every run claims its task with `tasks.py claim <task>` before working on it, and holds the claim until the run ends. `<task>` is `goal:<goal>` or `issue:<n>`. The claim is atomic: of two agents claiming one task at once, exactly one wins, and the other exits with code 2 and the holder's name. It belongs to this agent's process and frees itself when that process exits, so a crashed run never blocks a task for good. Claiming an issue also labels it `agent:shipping`, so agents on other machines skip it.
+No tool waits for CI. Never poll it: after `open_pr` or a push, end the run; the app watches CI and starts the next run.
 
-- **Picked from the list** — claim it right after the pick.
-- **Named in the argument** (a goal, `#<n>`, or an issue URL) — claim it before anything else. Exit 2 → tell the user which agent holds it, and stop.
-- **A new fuzzy requirement** — claim `goal:<goal>` as soon as the goal's name is chosen, before writing anything under `<goals>/<goal>/`. Exit 2 → choose another name.
+## Stage: explore
 
-Release it with `tasks.py release <task>` once the PRs are open (stage 6), or when the user stops the run.
+Follow `/requirement`'s explore run.
 
-## Where the work happens
+1. Read the idea in the prompt and the issue (`get_issue()`), then the repo, `GLOSSARY.md` and `docs/adr/`.
+2. Build the full requirement tree — breadth-first: who, done, must, must never, failure, out of scope — plus the language questions, shaped by the `questions` skill.
+3. `submit_questions(tree)` with `purpose: "requirement"` and the prompt's round number — or nothing, when nothing is the user's to decide.
+4. `stage_done(summary)`: the restatement, the question count, the assumptions you made.
 
-`<main>` is the repository's main checkout: the first path `git worktree list --porcelain` prints. `<goals>` is `<main>/.ship`. Every `.ship/` path in this skill and in the stage skills means `<goals>/`, written out as an absolute path, so the goal's files and the claims are the same from every worktree.
+Writes nothing to the repo.
 
-Each goal is built in its own git worktree at `<goals>/<goal>/worktree`. This replaces `/implement`'s "Set up the workspace" step:
+## Stage: design
 
-- Create it before the build: `git -C <main> worktree add -b <goal> <path> <base branch>`, or without `-b <goal>` and with `<goal>` in place of the base branch when the branch already exists. Reuse the worktree when it is already there.
-- With approaches, switch between their branches inside this one worktree.
-- A goal that touches other projects gets a worktree in each, at `<that project's main checkout>/.ship/<goal>/worktree`.
-- `cd` into the worktree. The build, the gate and every fix run there, and every subagent's brief names the worktree as the place to read and run the code.
-- When git refuses because the goal's branch is checked out in another worktree, tell the user where, and stop: switching that checkout's branch would disturb whatever is open there.
-- Once the PRs are open (stage 6), remove it: `git -C <main> worktree remove <path>`. The branch stays.
+First `/requirement`'s design run, then `/implement`'s design run, in this one run.
 
-## Issues
+1. Write the requirement from round 1's answers; save it and `submit_requirement(markdown)`.
+2. Update `GLOSSARY.md` and add ADRs that qualify; commit them on the goal branch as one `docs:` commit. Do not push.
+3. Analyze and Decide as `/implement` says; spike unproven claims.
+4. With prototypes asked for: build them in their worktrees, screenshot them, `upload_artifact` each screenshot, `start_preview` the recommended one, `submit_prototypes(list)`.
+5. `submit_decisions(markdown)` — the draft, with the user's decisions under Pending.
+6. `submit_questions(tree)` with `purpose: "design"`: the requirement `confirm` first, then the prototype pick, then the design questions.
+7. `stage_done(summary)`.
 
-An issue is where a goal starts, never where its documents live: the requirement and decisions go under `<goals>/<goal>/`, as for any goal.
+When round 1's answers unravel the idea, or a requirement gap unravels the requirement, submit a `follow_up` round of requirement questions instead of steps 2–6, and end the run.
 
-- The issue's goal is the directory under `<goals>/` whose `issue` file holds its number. When there is none yet, name the goal a short kebab-case description of what the issue achieves (e.g. `validate-requests`), and when creating its directory, write the issue's number to `<goals>/<goal>/issue`, so the listing and the claims treat the goal as the issue.
-- When the body follows `/requirement`'s template (it has an `## Acceptance criteria` section), save it unchanged as the goal's requirement and start at stage 2. Otherwise it is the fuzzy requirement stage 1 starts from.
-- Never edit the issue's body.
-- Every PR's description says `Closes #<n>`, so the issue drops off the list as soon as a PR is open, and closes when it merges.
+## Stage: build
 
-## Running a stage
+1. Follow `/implement`'s build run: apply round 2's answers (requirement confirmation first, then the decisions, ADRs, and the prototype pick), then Implement, Validate, Review (subagent), Fix, Simplify (subagent). Resubmit the requirement and decisions when they changed.
+2. Run the gate (below) until green.
+3. With `critical: yes` in the prompt: run the implementation check (below) and fix until it passes.
+4. `push_branch()`.
+5. `open_pr(title, body, draft: true)` — or, when the ticket already has a PR (a resumed build), `update_pr(body)`. The title is the requirement's title. The body carries the requirement's Goal and Acceptance criteria (reviewers cannot open `.ship/`), `Closes #<issue>`, the decisions the user made, and the checks that ran so far with their results. Never put `/verify` results in it; the app posts the proof.
+6. `stage_done(summary)`: what was built, review findings fixed vs skipped, what simplify changed, validation results.
 
-The stage skills are user-invocable only, so do not call them through a skill tool. Read the skill file and follow it: `~/.agents/skills/<name>/SKILL.md` (Claude Code: `~/.claude/skills/<name>/SKILL.md`).
+A mid-build surprise that only the user can decide: commit what is done (no push, no PR yet), submit a `follow_up` round, and `stage_done`.
 
-Overrides while `/ship` drives:
+## Stage: fix
 
-- **Skip every "Handing off to the next step" section.** Do not tell the user to run the next command or copy it to the clipboard; move straight to the next stage.
-- **`/implement` runs in this session** (see stage 2 below) and stops after its Simplify step. Its "Set up the workspace" step is replaced by the goal's worktree (see Where the work happens), and its Finish step (PRs and the report) by stages 3–6 here.
-- **`/verify` runs in a subagent** (see stage 5 below) and skips its Finish handoff. It cannot reach the user, so it returns its questions to this session instead of asking.
+The prompt says why: a red CI run (with the failing checks) or a merge conflict with the base branch.
 
-### Resuming
+- **Red CI.** Read `ci_status()` and `ci_logs(check)` for each failing check. Reproduce the failure locally with the same command CI runs, fix the cause — never the check — and rerun the command until it passes.
+- **Merge conflict.** `git merge origin/<base>` on the goal branch, resolve every conflict keeping both sides' intent (the requirement decides when they clash), and commit the merge. Never rebase or force-push a pushed branch.
 
-When the task is an existing goal (a directory under `<goals>/`, or an issue), start at the first stage that is not finished:
+Then run the gate until green, `push_branch()`, and `stage_done(summary)`: the cause, the fix, and the commands that now pass. The app waits for CI again. A failure you cannot fix without the user (a missing secret, a flaky external service, a requirement that cannot pass CI): submit a `follow_up` round instead of guessing, and end the run.
 
-- No requirement under `<goals>/<goal>/` → stage 1, unless the task is an issue whose body follows the template: save it as Issues says, then go on with the next rule.
-- Prototypes asked for, and `<goal>_prototype_*` branches but no pick in the decisions file → Prototypes, step 3.
-- No commits on the goal's branch yet → stage 2, from the build. The decisions file records what was already decided; do not re-ask it.
-- Commits but no simplify pass yet → stage 2, from `/implement`'s first unfinished step (the `code-review/` files show whether review and fixes are done).
-- Otherwise → the first check without a PASS report newer than the latest commit: in `verification/` for stages 3–4, in `verify/` for stage 5 (a report with no FAIL counts as a PASS).
+## Stage: verify
 
-Never redo a finished stage unless a check sends work back to it.
+1. **Final validation** — always, in a `verifier` subagent (below). On FAIL: fix it here, run the gate, `push_branch()`, run it again.
+2. **`/verify`** — always, in an `acceptance-tester` subagent (below). On FAIL: fix it here, run the gate, `push_branch()`, run the final validation again (its PASS predates the fix), then `/verify` again.
+3. **Proof.** Render the final `/verify` report to markdown with its `report.py` (the verify skill says how), then `submit_proof(report_markdown, files)` with the report and every screenshot it references.
+4. **PR description.** `update_pr(body)`: the build's body, plus every check's verdict and how many rounds it took, and every NOT RUN item of the final validation and `/verify`.
+5. `stage_done(summary)`: the verdict of every check, NOT RUN items, the report's result line.
+
+The app then marks the PR ready, waits for CI once more, and moves the ticket to In review. NOT RUN items do not block; they are listed.
+
+## Stage: job
+
+The prompt holds the job's instructions, written by the user; follow them once. The checkout is on the project's default branch. Jobs work across the project, so:
+
+- Use `list_pulls()`, `ci_status()`, `get_issue()` and `comment(body)` to find and report work.
+- To change a PR, check out its branch (already fetched), make the change, run the gate, commit, and `push_branch()`. Return to the default branch afterwards. Never commit to the default branch; `push_branch()` refuses it.
+- A job never submits questions; a decision only the user can make goes into the summary, which lands on the job's card.
+- End with `stage_done(summary)`: what you did, per PR or issue, and what you left for the user.
+
+## The gate — after every code change
+
+Run `/implement`'s Validate step as the gate in build, fix, verify and job runs, every time code changed, before dispatching a check or pushing:
+
+- `git status --porcelain` is empty on the branch.
+- Every mechanical check passes: the formatter in check mode, linters, type checks, unit tests and the build, found as Validate says. Run each with its output appended to `.ship/<goal>/verification/gate.log` and read its exit code; read the log only for a command that failed, so passing output stays out of the run's context.
+
+On a failure, fix it here and run the gate again. Gate rounds count against the Retries limit of the step that triggered them. No check is dispatched and nothing is pushed while the gate is red.
 
 ## Subagents
 
-Dispatch each subagent as its named agent: pi's `subagent` tool, or Claude Code's Agent tool, with the agent's name. Where the environment does not have that agent, use a general-purpose agent given its rules (`~/.pi/agent/agents/<agent>.md`, or restated in the brief when that file is absent). Every check's brief names the goal, where the requirement and the decisions file live, the branch and its worktree, and where to write the report. If the environment has no subagent capability, run the check in this session, say so in the report, and tell the user the check was not independent.
+Dispatch each subagent as its named agent: Claude Code's Agent tool, or pi's `subagent` tool, with the agent's name. Where the environment does not have that agent, use a general-purpose agent given the agent's rules restated in the brief. Every brief names the goal, where the requirement and the decisions file live, the branch and the checkout's path, and where to write the report. If the environment has no subagent capability, run the check in this run, say so in the report, and say in the summary that the check was not independent.
 
-Stage 2's review and simplify subagents are dispatched as `/implement` says.
+| Subagent         | Agent               | Writes files?               | Stage        |
+| ---------------- | ------------------- | --------------------------- | ------------ |
+| code review      | `code-reviewer`     | no                          | build        |
+| simplify         | `worker`            | yes                         | build        |
+| impl check       | `verifier`          | report only                 | build (`critical`) |
+| final validation | `verifier`          | report only                 | verify       |
+| verify           | `acceptance-tester` | report and screenshots only | verify       |
 
-| Subagent         | Agent               | Writes files?               |
-| ---------------- | ------------------- | --------------------------- |
-| code review      | `code-reviewer`     | no                          |
-| simplify         | `worker`            | yes                         |
-| impl check       | `verifier`          | report only                 |
-| final validation | `verifier`          | report only                 |
-| verify           | `acceptance-tester` | report and screenshots only |
+Subagents never call the app's tools. Only this run submits, pushes, opens PRs and ends the stage.
 
-Every check writes its report to `.ship/<goal>/verification/<n>-<check>.md` (`<check>` is `impl-check` or `final-validation`), where `<n>` is one higher than the highest number already in that directory. Each run gets its own file; earlier files are never edited. `.ship/` is local working state, never committed: before writing anything under it, create `.ship/.gitignore` containing `*` if it is missing, so git ignores the directory in every checkout.
+Every check writes its report to `.ship/<goal>/verification/<n>-<check>.md` (`<check>` is `impl-check` or `final-validation`), where `<n>` is one higher than the highest number already in that directory. Each run of a check gets its own file; earlier files are never edited.
 
 ```markdown
 # <Check> <n> — <goal>
@@ -136,75 +175,37 @@ Every check writes its report to `.ship/<goal>/verification/<n>-<check>.md` (`<c
 
 The verdict is FAIL when any row fails or any problem is listed.
 
-### Prototypes — only when the user asks for them
-
-"Prototype" in a `/ship` run always means: show me a few, I pick the best, and the pick is what we ship. It is never a request to build prototypes and stop. Do not ask whether to stop after the prototypes or ship the pick — the pick ships, through every remaining stage.
-
-Run this inside stage 2, after `/implement`'s Analyze and Decide steps and before its Implement step. In Decide, do not ask the Type 1 forks you will make the prototypes differ on; the pick settles them. Ask every other question as usual.
-
-1. **Build 2–3 prototypes**, or as many as the user named, never more than 3. Each one takes a genuinely different direction: a different approach at a fork, or a different design for UI work. Pick the directions yourself from the analysis; ask only if the requirement leaves no basis to choose.
-2. **Each prototype runs.** It is a working, unpolished build of the requirement's core, enough to judge the direction — not the final code. Build each on its own `<goal>_prototype_<name>` branch in the goal's worktree (`<name>` short kebab-case), committed. Prototypes skip review, simplify and the checks; they never get pushed or a PR.
-3. **Show them.** For each: its name, what sets it apart in one line, and the evidence to judge it — screenshots for anything visual, a command and its output for a CLI or service, the key part of the diff otherwise. Send screenshots to the user where the environment allows (Claude Code: SendUserFile).
-4. **Ask which one ships**, following the `questions` skill: one option per prototype in the ask-question tool. This is the only question prototypes add. A pick that combines prototypes ("A, with B's layout") is a valid answer.
-5. **Make the pick the goal.** Record it in the decisions file under `## Prototypes` (each prototype in one line, and the pick with the user's reason if they gave one). Then `git checkout -B <goal> <goal>_prototype_<pick>` in the worktree, and delete the other prototype branches.
-6. **Carry on with stage 2 from its Implement step**, finishing the picked prototype to production standard, then every check and the PR as usual.
-
-### 2. Implement — in this session
-
-Follow `/implement` steps 1–9 here: load the goal, analyze, decide, set up the workspace, implement, validate, review, fix, simplify. Its review (step 7) and simplify (step 9) run in subagents, as `/implement` says; the rest runs in this session.
-
-Ask `/implement`'s questions as its Decide step says, one at a time, following the `questions` skill. An answer that follows from what the user said in the requirement conversation needs no question. A question that unravels the requirement goes back through `/requirement` here instead. Question rounds do not count as retries.
-
-#### Gate — after every code change
-
-Run `/implement`'s Validate step as the gate every time `/implement` says to run or rerun it, and after every fix in stages 3–5, before dispatching anything else:
-
-- `git status --porcelain` is empty on the goal's branch.
-- Every mechanical check passes: the formatter in check mode, linters, type checks, unit tests and the build, found as Validate says. Run each with its output appended to `.ship/<goal>/verification/gate.log` and read its exit code; read the log only for a command that failed, so passing output stays out of this session's context.
-
-On a failure, fix it here and run the gate again. Gate rounds count against the Retries limit of the stage that triggered them. No check (stages 3–5) is dispatched while the gate is red: formatting, lint and unit failures are fixed here, not discovered by the final validation.
-
-### 3. Implementation check — `--critical` only
+### Implementation check — `critical` only
 
 Brief: read the requirement, the decisions file, and the full diff from the base branch. For every item under Requirements, Acceptance criteria and Constraints, point to the code that delivers it. Flag items that are missing or only partly done, behavior that contradicts an item or a recorded decision, and changes that serve no item or touch anything under Out of scope. Read the code; running it is the final validation's job.
 
-On FAIL: fix the problems here and run the gate, then run the check again.
+### Final validation — always
 
-### 4. Final validation — always
+Brief: prove the change works by running it, not by reading it. On the goal branch, run every acceptance criterion in the requirement as an observable check, plus the project's formatter, linters, type checks, tests and builds. Record each command and the part of its output that proves the result. Anything that cannot be run here (needs hardware, a reboot, a deploy, a credential) is reported as NOT RUN with the reason; it is never assumed to pass.
 
-Brief: prove the change works by running it, not by reading it. On the goal's branch, run every acceptance criterion in the requirement as an observable check, plus the project's formatter, linters, type checks, tests and builds. Record each command and the part of its output that proves the result. Anything that cannot be run here (needs hardware, a reboot, a deploy, a credential) is reported as NOT RUN with the reason; it is never assumed to pass.
+### Verify — always
 
-On FAIL: fix the problems here and run the gate, then run the check again. NOT RUN items do not block the PR, but they are listed in it.
+Brief: the goal, where the requirement and the decisions file live, the branch, the path to the verify skill (`<skills>/verify/SKILL.md`), and every answer the user has given for this ticket that bears on running or judging the app. It follows the skill in full and writes its report and screenshots under `.ship/<goal>/verify/`, not `verification/`.
 
-### 5. Verify — always
-
-Run `/verify` in a fresh subagent as the `acceptance-tester` agent. It drives a browser and a terminal, which the `verifier` agent's tools do not allow. Brief: the goal, where the requirement and the decisions file live, the branch, the path to `/verify`'s skill file (`~/.agents/skills/verify/SKILL.md`), and every answer the user has given for this goal so far. It follows the skill in full and writes its report and screenshots under `.ship/<goal>/verify/`, not `verification/`.
-
-The subagent cannot reach the user. When it needs something only the user can answer (how to run the app, credentials, what correct looks like), it stops and returns the questions instead of guessing. Ask them here, following the `questions` skill, save each answer as `/verify`'s Remembering section says, then dispatch a new verify subagent with the answers in its brief. Hand credentials over as environment variables in the brief, never in a file. Question rounds do not count as retries.
-
-On FAIL: fix the problems here, run the gate, run the final validation again (its PASS predates the fix), then run `/verify` again. NOT RUN tests do not block the PR, but they are listed in it.
+The subagent cannot reach the user. When it needs something only the user can answer (how to run the app, a test account, what correct looks like), it stops and returns the questions instead of guessing. Submit them as a `follow_up` round (`questions` skill), then `stage_done`; the verify stage runs again with the answers, and the next brief carries them. Hand a credential to the subagent as an environment variable in the brief, never in a file. Question rounds do not count as retries.
 
 ## Retries
 
-Each check gets at most 2 fix-and-recheck rounds. Still failing after that → stop and show the user the latest report, then ask how to continue, following the `questions` skill. Never weaken a check, edit a report, or drop a requirement item to get a PASS.
-
-## 6. PR
-
-Follow `/implement`'s Finish rules for how many PRs to open. Each PR description carries the requirement's Goal and Acceptance criteria, since the requirement file is local and reviewers cannot open it (for an issue, it also says `Closes #<n>`), lists the decisions the user made, lists the checks that ran with their verdicts, and lists every NOT RUN item of the final validation. `/verify`'s results stay out of the description, which would go stale the next time `/verify` runs: once each PR exists, post its branch's final `/verify` report on it with `publish.py --pr <url>`, as `/verify`'s "Post it on the PR" step describes. That comment carries the tests, the screenshots and the NOT RUN tests, and replaces the comment of any earlier run.
-
-Report to the user: what was built, the verdict of every check and how many rounds each took, review findings fixed vs skipped, what simplify changed, NOT RUN items, the `/verify` report path and its PR comment URL, then the PRs as a list — one bullet per PR with its title and URL. Then open the final `/verify` report in the browser by running `~/.agents/skills/verify/scripts/report.py` on its `<n>-report.json`.
-
-Finally, release the claim and remove the goal's worktree (see Claiming the task and Where the work happens).
+Each check, and each fix run, gets at most 2 fix-and-recheck rounds. Still failing after that → submit a `follow_up` round showing the latest report's problems in the `context` and asking how to continue (the options are the user's: a hint to try, accept it as it stands with the failures listed in the PR, or stop the ticket), then `stage_done`. The app also stops starting fix runs after 2 rounds and marks the ticket failed. Never weaken a check, edit a report, or drop a requirement item to get a PASS.
 
 ## Never
 
-- Never run unless the user explicitly invoked this skill.
-- Never work on a task without holding its claim, or take one another live agent holds unless the user confirms it.
-- Never build in `<main>`'s working tree; build in the goal's worktree.
-- Never skip the final validation or `/verify`, with or without `--critical`.
+- Never run unless a stage run's prompt sent you here.
+- Never do another stage's work, or end a run without `stage_done`.
+- Never merge, try to merge, or ask for a way to merge.
+- Never reach GitHub except through the app's tools: no `git push`, no CLI, no API calls, no tokens.
+- Never push the default branch, rebase a pushed branch, or force-push.
+- Never poll or wait for CI; the app does.
+- Never ask the user in the chat; questions go to the card.
+- Never skip the final validation or `/verify`.
 - Never ask whether to stop after prototypes; the user's pick ships.
-- Never dispatch a check while the gate is red.
-- Never let a checker fix what it checks, or see the conversation that produced the work.
-- Never open a PR while a check is failing.
+- Never dispatch a check or push while the gate is red.
+- Never let a checker fix what it checks, see how the work was made, or call the app's tools.
+- Never open the PR before the build's checks pass, or mark it ready yourself; the app does after verify.
 - Never claim a check passed that did not run.
 - Never edit or delete an earlier verification report.
