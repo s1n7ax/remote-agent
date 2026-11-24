@@ -1,0 +1,144 @@
+CREATE TABLE IF NOT EXISTS projects (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	repo TEXT NOT NULL UNIQUE,
+	default_branch TEXT NOT NULL DEFAULT 'main',
+	agent TEXT NOT NULL DEFAULT 'claude',
+	model TEXT NOT NULL DEFAULT '',
+	effort TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tickets (
+	id INTEGER PRIMARY KEY,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	kind TEXT NOT NULL DEFAULT 'ticket',
+	title TEXT NOT NULL,
+	idea TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL,
+	stage TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	effort TEXT NOT NULL DEFAULT '',
+	prototypes INTEGER NOT NULL DEFAULT 0,
+	issue INTEGER NOT NULL DEFAULT 0,
+	branch TEXT NOT NULL DEFAULT '',
+	pr INTEGER NOT NULL DEFAULT 0,
+	verified_sha TEXT NOT NULL DEFAULT '',
+	requirement TEXT NOT NULL DEFAULT '',
+	decisions TEXT NOT NULL DEFAULT '',
+	status_note TEXT NOT NULL DEFAULT '',
+	start_at TIMESTAMP,
+	wait_until TIMESTAMP,
+	fix_rounds INTEGER NOT NULL DEFAULT 0,
+	spend_usd REAL NOT NULL DEFAULT 0,
+	spend_cap_usd REAL NOT NULL DEFAULT 0,
+	job_prompt TEXT NOT NULL DEFAULT '',
+	prototypes_json TEXT NOT NULL DEFAULT '[]',
+	created_at TIMESTAMP NOT NULL,
+	updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tickets_project ON tickets(project_id, status);
+
+CREATE TABLE IF NOT EXISTS rounds (
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	n INTEGER NOT NULL,
+	purpose TEXT NOT NULL,
+	stage TEXT NOT NULL,
+	tree TEXT NOT NULL,
+	answers TEXT NOT NULL DEFAULT '{}',
+	completed_at TIMESTAMP,
+	created_at TIMESTAMP NOT NULL,
+	PRIMARY KEY (ticket_id, n)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+	id INTEGER PRIMARY KEY,
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	stage TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	effort TEXT NOT NULL DEFAULT '',
+	account_id INTEGER NOT NULL DEFAULT 0,
+	session_id TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL,
+	summary TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	cost_usd REAL NOT NULL DEFAULT 0,
+	started_at TIMESTAMP,
+	finished_at TIMESTAMP,
+	created_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS runs_ticket ON runs(ticket_id);
+
+CREATE TABLE IF NOT EXISTS run_events (
+	id INTEGER PRIMARY KEY,
+	run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	kind TEXT NOT NULL,
+	text TEXT NOT NULL,
+	data TEXT,
+	created_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS run_events_run ON run_events(run_id, id);
+
+CREATE TABLE IF NOT EXISTS accounts (
+	id INTEGER PRIMARY KEY,
+	label TEXT NOT NULL,
+	token TEXT NOT NULL,
+	priority INTEGER NOT NULL DEFAULT 0,
+	exhausted_till TIMESTAMP,
+	warning INTEGER NOT NULL DEFAULT 0,
+	utilization REAL NOT NULL DEFAULT 0,
+	created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schedules (
+	id INTEGER PRIMARY KEY,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	name TEXT NOT NULL,
+	cron TEXT NOT NULL,
+	prompt TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	effort TEXT NOT NULL DEFAULT '',
+	enabled INTEGER NOT NULL DEFAULT 1,
+	last_run_at TIMESTAMP,
+	next_run_at TIMESTAMP,
+	created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+	id TEXT PRIMARY KEY,
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	run_id INTEGER NOT NULL DEFAULT 0,
+	name TEXT NOT NULL,
+	mime TEXT NOT NULL,
+	size INTEGER NOT NULL,
+	created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS proofs (
+	id INTEGER PRIMARY KEY,
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	run_id INTEGER NOT NULL,
+	verdict TEXT NOT NULL,
+	report TEXT NOT NULL,
+	files TEXT NOT NULL DEFAULT '[]',
+	created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spend (
+	day TEXT PRIMARY KEY,
+	usd REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+	endpoint TEXT PRIMARY KEY,
+	subscription TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL
+);

@@ -86,6 +86,7 @@ type Ticket struct {
 	Issue       int        `json:"issue,omitempty"`
 	Branch      string     `json:"branch,omitempty"`
 	PR          int        `json:"pr,omitempty"`
+	VerifiedSHA string     `json:"verifiedSha,omitempty"`
 	Requirement string     `json:"requirement,omitempty"`
 	Decisions   string     `json:"decisions,omitempty"`
 	StatusNote  string     `json:"statusNote,omitempty"`
