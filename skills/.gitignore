@@ -1,0 +1,3 @@
+# Eval results are local; the app keeps benchmark results in its database.
+*/evals/results/
+__pycache__/
