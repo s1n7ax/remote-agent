@@ -8,12 +8,9 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/s1n7ax/remote-agent/internal/domain"
 )
 
 // preview is the single live prototype preview (one at a time keeps RAM
@@ -84,10 +81,10 @@ func (o *Orchestrator) StartPrototypePreview(ctx context.Context, ticketID int64
 	}
 	for _, p := range ps {
 		if p.Name == name {
-			if p.PreviewCmd == "" || p.PreviewPort == 0 {
+			if p.Preview == nil || p.Preview.Command == "" || p.Preview.Port == 0 {
 				return nil, invalid("prototype %q has no preview command", name)
 			}
-			return o.startPreview(ctx, ticketID, p.Branch, p.PreviewCmd, p.PreviewPort)
+			return o.startPreview(ctx, ticketID, p.Branch, p.Preview.Command, p.Preview.Port)
 		}
 	}
 	return nil, invalid("ticket has no prototype %q", name)
@@ -120,13 +117,11 @@ func (o *Orchestrator) startPreview(ctx context.Context, ticketID int64, branch,
 	defer o.prev.mu.Unlock()
 	o.stopPreviewLocked()
 
-	repo := o.repoDir(t.ProjectID)
-	dir := filepath.Join(o.projectDir(t.ProjectID), "work", fmt.Sprintf("%d-preview", t.ID))
-	if _, err := os.Stat(dir); err == nil {
-		_ = git(ctx, "-C", repo, "worktree", "remove", "--force", dir)
-	}
-	if err := git(ctx, "-C", repo, "worktree", "add", "--detach", dir, branch); err != nil {
-		return nil, err
+	// Prototypes live in worktrees inside the ticket's checkout; the
+	// command is run from the checkout root (it cds into its worktree).
+	dir := o.workDir(t)
+	if _, err := os.Stat(dir); err != nil {
+		return nil, invalid("the ticket has no checkout to preview")
 	}
 	argv := []string{"bash", "-lc", command}
 	env := []string{"PATH=" + o.cfg.SandboxPATH, "HOME=" + o.homeDir(t.ProjectID), fmt.Sprintf("PORT=%d", port)}
@@ -157,20 +152,4 @@ func (o *Orchestrator) startPreview(ctx context.Context, ticketID int64, branch,
 	}(cmd)
 	o.bus.Publish(Message{Type: "ticket", ProjectID: t.ProjectID, TicketID: t.ID, Data: t})
 	return &PreviewInfo{TicketID: t.ID, Branch: branch, URL: o.cfg.PreviewURL}, nil
-}
-
-// pickedPrototype returns the prototype chosen in a completed round, if any.
-func pickedPrototype(rds []domain.Round, ps []domain.Prototype) *domain.Prototype {
-	for i := len(rds) - 1; i >= 0; i-- {
-		a, ok := rds[i].Answers["prototype"]
-		if !ok || len(a.OptionIDs) == 0 {
-			continue
-		}
-		for j := range ps {
-			if ps[j].Name == a.OptionIDs[0] {
-				return &ps[j]
-			}
-		}
-	}
-	return nil
 }

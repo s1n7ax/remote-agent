@@ -215,11 +215,11 @@ func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain
 		}
 		skillsDir = dir
 		links := map[string]string{
-			filepath.Join(cfgDir, "skills"):           dir,
-			filepath.Join(cfgDir, "agents"):           filepath.Join(dir, "agents"),
-			filepath.Join(home, ".agents", "skills"):  dir,
-			filepath.Join(home, ".claude", "skills"):  dir,
-			filepath.Join(home, ".claude", "agents"):  filepath.Join(dir, "agents"),
+			filepath.Join(cfgDir, "skills"):               dir,
+			filepath.Join(cfgDir, "agents"):               filepath.Join(dir, "agents"),
+			filepath.Join(home, ".agents", "skills"):      dir,
+			filepath.Join(home, ".claude", "skills"):      dir,
+			filepath.Join(home, ".claude", "agents"):      filepath.Join(dir, "agents"),
 			filepath.Join(home, ".pi", "agent", "agents"): filepath.Join(dir, "agents"),
 		}
 		for link, target := range links {

@@ -92,23 +92,30 @@ func (o *Orchestrator) ToolSubmitQuestions(ctx context.Context, token string, tr
 	if err != nil {
 		return 0, err
 	}
+	ar.mu.Lock()
+	already := ar.questions
+	ar.mu.Unlock()
+	if already {
+		return 0, invalid("this run already submitted its questions; one submit_questions call per run")
+	}
 	if err := questions.Validate(tree); err != nil {
 		return 0, invalid("%v", err)
 	}
 	if purpose == "" {
-		switch ar.ticket.Stage {
-		case domain.StageExplore:
-			purpose = domain.PurposeRequirement
-		case domain.StageDesign:
-			purpose = domain.PurposeDesign
-		default:
-			purpose = domain.PurposeFollowUp
-		}
+		purpose = tree.Purpose
+	}
+	if purpose == "" {
+		purpose = domain.PurposeFollowUp
 	}
 	stage := ar.ticket.Stage
-	if purpose == domain.PurposeRequirement || purpose == domain.PurposeDesign {
+	switch purpose {
+	case domain.PurposeRequirement, domain.PurposeDesign:
 		stage = nextStage(stage)
+	case domain.PurposeFollowUp:
+	default:
+		return 0, invalid("purpose must be requirement, design or follow_up")
 	}
+	tree.Purpose = purpose
 	rd, err := o.st.AddRound(ctx, domain.Round{TicketID: ar.ticket.ID, Purpose: purpose, Stage: stage, Tree: tree})
 	if err != nil {
 		return 0, err
@@ -260,7 +267,9 @@ func (o *Orchestrator) storeArtifact(ctx context.Context, ar *activeRun, path st
 }
 
 // ArtifactPath returns where an artifact's bytes live.
-func (o *Orchestrator) ArtifactPath(id string) string { return o.cfg.Path("artifacts", filepath.Base(id)) }
+func (o *Orchestrator) ArtifactPath(id string) string {
+	return o.cfg.Path("artifacts", filepath.Base(id))
+}
 
 // ToolSubmitProof stores the verify stage's evidence and posts it on the PR.
 func (o *Orchestrator) ToolSubmitProof(ctx context.Context, token, verdict, report string, files []string) error {

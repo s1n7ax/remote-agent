@@ -169,6 +169,7 @@ const (
 
 // QuestionTree is one round of questions on a ticket.
 type QuestionTree struct {
+	Purpose   Purpose    `json:"purpose,omitempty"`
 	Title     string     `json:"title"`
 	Intro     string     `json:"intro,omitempty"`
 	Questions []Question `json:"questions"`
@@ -291,12 +292,17 @@ type Artifact struct {
 
 // Prototype is one option the user picks from.
 type Prototype struct {
-	Name        string   `json:"name"`
-	Branch      string   `json:"branch"`
-	Summary     string   `json:"summary"`
-	Screenshots []string `json:"screenshots,omitempty"` // artifact ids
-	PreviewCmd  string   `json:"previewCmd,omitempty"`
-	PreviewPort int      `json:"previewPort,omitempty"`
+	Name        string            `json:"name"`
+	Branch      string            `json:"branch"`
+	Description string            `json:"description"`
+	Artifacts   []string          `json:"artifacts,omitempty"` // screenshot artifact ids
+	Preview     *PrototypePreview `json:"preview,omitempty"`
+}
+
+// PrototypePreview is how to run a prototype for the live preview.
+type PrototypePreview struct {
+	Command string `json:"command"`
+	Port    int    `json:"port"`
 }
 
 // Proof is the test evidence attached to a ticket.

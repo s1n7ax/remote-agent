@@ -21,7 +21,7 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 	}
 	ar.mu.Lock()
 	stop, shutdown, capped, limit := ar.stopRequested, ar.shutdown, ar.capped, ar.limit
-	questions, prOpened, proof, summary := ar.questions, ar.prOpened, ar.proof, ar.summary
+	questions, prOpened, proof, summary, stageDone := ar.questions, ar.prOpened, ar.proof, ar.summary, ar.stageDone
 	ar.mu.Unlock()
 	if summary == "" {
 		summary = final.Summary
@@ -51,6 +51,18 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 		t.Status = domain.StatusFailed
 		t.StatusNote = final.Err.Error()
 		o.notify(ctx, domain.NotifyRunFailed, t, "Run failed: "+final.Err.Error())
+	case !stageDone && !questions:
+		// The agent stopped without finishing its stage: resume it once,
+		// then give up.
+		o.finishRunRecord(ctx, ar, domain.RunFailed, "the run ended without stage_done")
+		if o.endedUnfinishedBefore(ctx, t) {
+			t.Status = domain.StatusFailed
+			t.StatusNote = "the agent ended the stage twice without finishing it"
+			o.notify(ctx, domain.NotifyRunFailed, t, t.StatusNote)
+		} else {
+			t.Status = domain.StatusReady
+			t.StatusNote = "resuming a stage the agent did not finish"
+		}
 	default:
 		o.finishRunRecord(ctx, ar, domain.RunSucceeded, "")
 		o.advance(ctx, &t, questions, prOpened, proof)
@@ -147,4 +159,15 @@ func (o *Orchestrator) markReady(ctx context.Context, t *domain.Ticket) {
 	t.Stage, t.Status = domain.StageCI, domain.StatusWaiting
 	t.StatusNote = "verified; waiting for the final CI run"
 	t.VerifiedSHA = pr.HeadSHA
+}
+
+// endedUnfinishedBefore reports whether the run before the latest one of the
+// ticket's stage also ended without stage_done.
+func (o *Orchestrator) endedUnfinishedBefore(ctx context.Context, t domain.Ticket) bool {
+	runs, err := o.st.TicketRuns(ctx, t.ID)
+	if err != nil || len(runs) < 2 {
+		return false
+	}
+	prev := runs[1]
+	return prev.Stage == t.Stage && prev.Status == domain.RunFailed && prev.Error == "the run ended without stage_done"
 }
