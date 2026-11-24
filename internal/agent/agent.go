@@ -4,10 +4,17 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/s1n7ax/remote-agent/internal/domain"
 )
+
+// ErrStopped is the Done error of a session ended by Stop or by its context.
+var ErrStopped = errors.New("agent stopped")
+
+// ErrEnded is returned by Send and Interrupt once the session's run is over.
+var ErrEnded = errors.New("agent session ended")
 
 // Spec is everything a runner needs to start one run.
 type Spec struct {
@@ -78,7 +85,8 @@ type Event struct {
 type Session interface {
 	// Events streams the agent's events; closed after the Done event.
 	Events() <-chan Event
-	// Send delivers a user message mid-run.
+	// Send delivers a user message mid-run; the session logs it as an
+	// EventUser line.
 	Send(ctx context.Context, text string) error
 	// Interrupt stops the current turn; the agent stays alive awaiting input.
 	Interrupt(ctx context.Context) error
