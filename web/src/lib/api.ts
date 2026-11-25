@@ -66,13 +66,28 @@ export const fetchTransport: Transport = async (method, path, body) => {
 };
 
 let transport: Transport = fetchTransport;
+let unauthorized: () => void = () => {};
+
+/** Registers what happens when the server asks the browser to sign in. */
+export function onUnauthorized(f: () => void): void {
+  unauthorized = f;
+}
 
 /** Replaces the transport (mock mode, tests). */
 export function setTransport(t: Transport): void {
   transport = t;
 }
 
-function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return (await rawCall(method, path, body)) as T;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401 && path !== '/api/login') unauthorized();
+    throw e;
+  }
+}
+
+function rawCall<T>(method: string, path: string, body?: unknown): Promise<T> {
   return transport(method, path, body) as Promise<T>;
 }
 
@@ -87,6 +102,8 @@ type Done<K extends string> = Record<K, boolean>;
 
 export const api = {
   state: () => call<AppState>('GET', '/api/state'),
+  login: (token: string) => call<{ ok: boolean }>('POST', '/api/login', { token }),
+  logout: () => call<{ ok: boolean }>('POST', '/api/logout'),
 
   // projects
   projects: () => call<Project[]>('GET', '/api/projects'),
@@ -174,21 +191,30 @@ export type EventSourceFactory = (onEvent: (ev: ServerEvent) => void) => () => v
 
 /** Subscribes to /api/events; returns an unsubscribe function. EventSource reconnects by itself. */
 export const sseEvents: EventSourceFactory = (onEvent) => {
-  const es = new EventSource('/api/events');
   const kinds = ['ticket', 'run_event', 'board'] as const;
-  const handlers = kinds.map((type) => {
-    const h = (m: MessageEvent<string>) => {
-      try {
-        onEvent({ ...JSON.parse(m.data), type } as ServerEvent);
-      } catch {
-        // ignore malformed events
-      }
+  let es: EventSource;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+  const handler = (type: (typeof kinds)[number]) => (m: MessageEvent<string>) => {
+    try {
+      onEvent({ ...JSON.parse(m.data), type } as ServerEvent);
+    } catch {
+      // ignore malformed events
+    }
+  };
+  const open = () => {
+    es = new EventSource('/api/events');
+    for (const k of kinds) es.addEventListener(k, handler(k));
+    // EventSource retries network errors itself but gives up on an HTTP error
+    // (e.g. 401 before signing in); try again a little later.
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED && !closed) retry = setTimeout(open, 5000);
     };
-    es.addEventListener(type, h);
-    return h;
-  });
+  };
+  open();
   return () => {
-    kinds.forEach((k, i) => es.removeEventListener(k, handlers[i]));
+    closed = true;
+    clearTimeout(retry);
     es.close();
   };
 };

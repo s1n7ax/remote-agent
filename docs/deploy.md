@@ -100,10 +100,18 @@ The service does not start until `githubTokenFile` exists. Set
 `openrouterKeyFile = null` if you do not use Pi. Claude accounts are added in
 the app (Accounts), not here.
 
-## 7. Done
+## 7. Sign in
 
-Open `https://remote-agent.<tailnet>.ts.net` from a device on the tailnet
-and add it to the home screen (needed for push notifications on iOS).
+The app creates a login token on first start. Print a one-tap pairing link:
+
+```sh
+ssh root@<droplet> 'echo "https://remote-agent.<tailnet>.ts.net/#/login?token=$(cat /var/lib/remote-agent/login-token)"'
+```
+
+Open it on your phone (or paste the token on the sign-in screen); the browser
+stays signed in. Add the app to the home screen (needed for push
+notifications on iOS). To sign every browser out, delete the `session_secret`
+setting or replace the token file and restart the service.
 
 ## How updates flow
 

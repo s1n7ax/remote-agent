@@ -15,6 +15,7 @@ fi
 [ -x "$RA_BIN" ] || go build -o "$RA_BIN" "$here/../cmd/remote-agent"
 [ -x "$FAKEGH_BIN" ] || go build -o "$FAKEGH_BIN" "$here/fakegithub"
 echo fake-token > "$dir/gh-token"
+echo e2e-login-token > "$dir/login-token"
 cat > "$dir/config.json" <<JSON
 {
   "listen": "127.0.0.1:$app_port",
@@ -22,6 +23,7 @@ cat > "$dir/config.json" <<JSON
   "previewListen": "127.0.0.1:$((app_port + 2))",
   "dataDir": "$dir/data",
   "githubTokenFile": "$dir/gh-token",
+  "loginTokenFile": "$dir/login-token",
   "githubApiUrl": "http://127.0.0.1:$gh_port/api",
   "githubGraphqlUrl": "http://127.0.0.1:$gh_port/api/graphql",
   "gitUrl": "http://127.0.0.1:$gh_port/git",

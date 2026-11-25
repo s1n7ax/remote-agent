@@ -5,20 +5,35 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 // GitHub and the agents are fakes (fakegithub, e2e/agents/*.json).
 
 const GH = 'http://127.0.0.1:17800';
-const headers = { 'X-Requested-With': 'remote-agent' };
+const token = 'e2e-login-token'; // written by start.sh
+const headers = { 'X-Requested-With': 'remote-agent', Authorization: `Bearer ${token}` };
 
 async function ticket(request: APIRequestContext, id: number) {
-  return (await (await request.get(`/api/tickets/${id}`)).json()).ticket;
+  return (await (await request.get(`/api/tickets/${id}`, { headers })).json()).ticket;
 }
 
 async function github(request: APIRequestContext) {
   return (await (await request.get(`${GH}/_control/state`)).json())['e2e/demo'];
 }
 
+test('the API refuses calls without the login token', async ({ request }) => {
+  expect((await request.get('/api/state')).status()).toBe(401);
+  const merge = await request.post('/api/projects/1/pulls/1/merge', { headers: { 'X-Requested-With': 'remote-agent' } });
+  expect(merge.status()).toBe(401);
+  expect((await request.get('/healthz')).status()).toBe(200);
+});
+
 test('a ticket goes from idea to merged', async ({ page, request }) => {
+  // Sign in: first the token screen, then a wrong and the right token.
+  await page.goto('/');
+  await page.getByLabel('Login token').fill('wrong');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByText('wrong login token')).toBeVisible();
+  await page.goto(`/#/login?token=${token}`);
+  await expect(page.getByRole('dialog', { name: 'Projects' })).toBeVisible();
+
   // Add a project through the UI, then the demo project (fake agent) via the API.
   // With no projects the Projects sheet opens on its own.
-  await page.goto('/');
   const sheet = page.getByRole('dialog', { name: 'Projects' });
   await sheet.getByRole('button', { name: 'Add project' }).click();
   await sheet.getByPlaceholder('owner/name').fill('e2e/other');

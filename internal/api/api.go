@@ -34,6 +34,7 @@ type Server struct {
 	Skills  *skills.Manager
 	Bench   *skills.Bench
 	Push    Push
+	Auth    *Auth
 	SPA     fs.FS // the built frontend (index.html at its root)
 	Log     *slog.Logger
 	Version string
@@ -58,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	mux.HandleFunc("GET /healthz", s.health)
+	h("POST /api/login", s.login)
+	h("POST /api/logout", s.logout)
 	h("GET /api/idle", s.idle)
 	h("POST /api/drain", s.drain)
 	h("GET /api/state", s.state)
@@ -112,7 +115,7 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/push/test", s.pushTest)
 
 	mux.Handle("/", s.spa())
-	return securityHeaders(mux)
+	return securityHeaders(s.Auth.middleware(mux))
 }
 
 // securityHeaders sets conservative headers on every response.

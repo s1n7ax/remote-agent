@@ -10,6 +10,7 @@
   import Settings from './views/Settings.svelte';
   import Skills from './views/Skills.svelte';
   import Ticket from './views/Ticket.svelte';
+  import Login from './views/Login.svelte';
 
   const LAST = 'ra-project';
   let switching = $state(false);
@@ -41,7 +42,7 @@
   });
 
   $effect(() => {
-    if (route.name === 'home' && app.state) {
+    if (route.name === 'home' && app.state && !location.hash.startsWith('#/login')) {
       if (fallback) router.go({ name: 'board', projectId: fallback.id }, true);
       else switching = true;
     }
@@ -95,7 +96,9 @@
 </header>
 
 <main>
-  {#if app.error && !app.state}
+  {#if app.needsLogin}
+    <Login />
+  {:else if app.error && !app.state}
     <div class="page">
       <div class="empty">
         <p>Could not reach the server: {app.error}</p>

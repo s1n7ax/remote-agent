@@ -12,6 +12,7 @@
 #   RA_NIX, RA_NIXOS_REBUILD, RA_NIXOS_VERSION, RA_HEALTHCHECK
 #   RA_SYSTEM_PROFILE  (default /nix/var/nix/profiles/system)
 #   RA_STATE_DIR       remembers a revision that failed (default /var/lib/remote-agent-deploy)
+#   RA_TOKEN_FILE      the app's login token, sent as a bearer (default /var/lib/remote-agent/login-token)
 
 : "${RA_FLAKE:?RA_FLAKE must be set}"
 : "${RA_URL:=http://127.0.0.1:7700}"
@@ -25,6 +26,7 @@
 : "${RA_HEALTHCHECK:=remote-agent healthcheck --url $RA_URL}"
 : "${RA_SYSTEM_PROFILE:=/nix/var/nix/profiles/system}"
 : "${RA_STATE_DIR:=/var/lib/remote-agent-deploy}"
+: "${RA_TOKEN_FILE:=/var/lib/remote-agent/login-token}"
 failed_file="$RA_STATE_DIR/failed-rev"
 
 log() { echo "auto-deploy: $*" >&2; }
@@ -54,7 +56,10 @@ wait_healthy() {
 }
 
 drain() {
+  local token
+  token=$(tr -d '[:space:]' <"$RA_TOKEN_FILE") || return 1
   curl -fsS --max-time 10 -X POST -H 'Content-Type: application/json' \
+    -H 'X-Requested-With: remote-agent' -H "Authorization: Bearer $token" \
     -d "{\"drain\":$1}" "$RA_URL/api/drain" >/dev/null
 }
 

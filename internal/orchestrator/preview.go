@@ -41,7 +41,16 @@ func (o *Orchestrator) ServePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no preview is running; start one from the ticket", http.StatusServiceUnavailable)
 		return
 	}
-	httputil.NewSingleHostReverseProxy(target).ServeHTTP(w, r)
+	// The preview shares the app's host name, so the browser sends it the
+	// app's session cookie; agent-written servers must never see it.
+	r.Header.Del("Cookie")
+	r.Header.Del("Authorization")
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ModifyResponse = func(res *http.Response) error {
+		res.Header.Del("Set-Cookie") // nor overwrite it
+		return nil
+	}
+	proxy.ServeHTTP(w, r)
 }
 
 // Preview returns the running preview, if any.

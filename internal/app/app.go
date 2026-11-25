@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -95,7 +97,14 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 	orch := orchestrator.New(opts)
 	host.O = orch
 
+	auth, err := loadAuth(ctx, st, cfg.LoginTokenFile)
+	if err != nil {
+		return err
+	}
+	log.Info("login token", "file", cfg.LoginTokenFile)
+
 	srv := &api.Server{
+		Auth: auth,
 		Orch: orch, Store: st, GitHub: gh, Skills: sk, Bench: bench, Push: notifier, SPA: spa, Log: log, Version: version,
 		OpenRouterConfigured: func() bool {
 			k, err := config.ReadSecret(cfg.OpenRouterKeyFile)
@@ -141,6 +150,39 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 		_ = s.Shutdown(shutdown)
 	}
 	return err
+}
+
+// loadAuth reads the login token, creating it on first start, and the
+// session-signing secret.
+func loadAuth(ctx context.Context, st *store.Store, tokenFile string) (*api.Auth, error) {
+	tok, err := config.ReadSecret(tokenFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		tok = randomHex(24)
+		err = os.WriteFile(tokenFile, []byte(tok+"\n"), 0o600)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("login token: %w", err)
+	}
+	if tok == "" {
+		return nil, fmt.Errorf("login token file %s is empty", tokenFile)
+	}
+	secret, found, err := st.Setting(ctx, "session_secret")
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		secret = randomHex(32)
+		if err := st.SetSetting(ctx, "session_secret", secret); err != nil {
+			return nil, err
+		}
+	}
+	return &api.Auth{Token: tok, Secret: []byte(secret)}, nil
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // benchEnv gives a skill benchmark the first usable Claude account.

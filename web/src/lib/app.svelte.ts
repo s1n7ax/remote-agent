@@ -1,6 +1,6 @@
 // Global app state loaded from /api/state.
 
-import { api } from './api';
+import { api, onUnauthorized } from './api';
 import { errorText } from './format';
 import type { AgentKind, AppState, Project } from './types';
 
@@ -23,6 +23,18 @@ export function modelLabel(id: string): string {
 class App {
   state = $state<AppState | null>(null);
   error = $state<string | null>(null);
+  /** The server wants this browser to sign in with the login token. */
+  needsLogin = $state(false);
+
+  constructor() {
+    onUnauthorized(() => (this.needsLogin = true));
+  }
+
+  async login(token: string): Promise<void> {
+    await api.login(token);
+    this.needsLogin = false;
+    await this.load();
+  }
   toast = $state<{ text: string; kind: 'ok' | 'error' } | null>(null);
   #toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -37,7 +49,7 @@ class App {
       this.state = st;
       this.error = null;
     } catch (e) {
-      this.error = errorText(e);
+      if (!this.needsLogin) this.error = errorText(e);
     }
   }
 

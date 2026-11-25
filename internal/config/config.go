@@ -33,6 +33,9 @@ type Config struct {
 	GitHubGraphQLURL  string `json:"githubGraphqlUrl"`
 	GitURL            string `json:"gitUrl"`
 	OpenRouterKeyFile string `json:"openrouterKeyFile"`
+	// LoginTokenFile holds the token that pairs a browser and authenticates
+	// host scripts; empty means <dataDir>/login-token, created on first start.
+	LoginTokenFile string `json:"loginTokenFile"`
 
 	ClaudeBin string `json:"claudeBin"`
 	PiBin     string `json:"piBin"`
@@ -84,6 +87,7 @@ func (c *Config) defaults() {
 	def(&c.MCPListen, "127.0.0.1:7701")
 	def(&c.PreviewListen, "127.0.0.1:7702")
 	def(&c.DataDir, "/var/lib/remote-agent")
+	def(&c.LoginTokenFile, filepath.Join(c.DataDir, "login-token"))
 	def(&c.GitHubAPIURL, "https://api.github.com")
 	def(&c.GitHubGraphQLURL, "https://api.github.com/graphql")
 	def(&c.GitURL, "https://github.com")

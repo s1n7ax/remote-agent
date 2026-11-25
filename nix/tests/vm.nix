@@ -136,6 +136,12 @@ pkgs.testers.runNixOSTest {
           print("listeners:", listeners)
           assert listeners and all(l.startswith("127.0.0.1:") for l in listeners), listeners
 
+      with subtest("the API needs the login token"):
+          code = server.succeed("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7700/api/state")
+          assert code == "401", f"/api/state without credentials returned {code}"
+          server.succeed("test \"$(stat -c %a /var/lib/remote-agent/login-token)\" = 600")
+          server.succeed("curl -fsS -H \"Authorization: Bearer $(cat /var/lib/remote-agent/login-token)\" http://127.0.0.1:7700/api/state | jq -e 'has(\"projects\")'")
+
       with subtest("config.json follows the Config contract"):
           server.succeed("jq -e '.listen == \"127.0.0.1:7700\" and .mcpListen == \"127.0.0.1:7701\" and .maxParallelRuns == 2' /var/lib/remote-agent/config.json")
           server.succeed("jq -e '.githubTokenFile == \"/run/credentials/remote-agent.service/github-token\"' /var/lib/remote-agent/config.json")
