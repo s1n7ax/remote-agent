@@ -26,17 +26,16 @@ type Upload struct {
 
 // AddUpload records an upload's metadata (the file is stored by the
 // caller). CreatedAt defaults to now.
-func (s *Store) AddUpload(ctx context.Context, u Upload) (Upload, error) {
+func (s *Store) AddUpload(ctx context.Context, u Upload) error {
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = now()
 	}
-	u.CreatedAt = u.CreatedAt.UTC()
 	_, err := s.db.ExecContext(ctx, `INSERT INTO uploads(id, project_id, name, mime, size, created_at) VALUES(?,?,?,?,?,?)`,
-		u.ID, u.ProjectID, u.Name, u.MIME, u.Size, u.CreatedAt)
+		u.ID, u.ProjectID, u.Name, u.MIME, u.Size, u.CreatedAt.UTC())
 	if err != nil {
-		return u, fmt.Errorf("add upload: %w", err)
+		return fmt.Errorf("add upload: %w", err)
 	}
-	return u, nil
+	return nil
 }
 
 // DeleteUploadsBefore removes uploads never attached to a ticket and created

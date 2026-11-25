@@ -78,3 +78,11 @@ export function seesImages(state: AppState | null, agent: AgentKind, model: stri
 export function blindWarning(count: number): string {
   return `This model can't look at images. The agent will be told about your ${count} image${count === 1 ? '' : 's'} but won't see ${count === 1 ? 'it' : 'them'}.`;
 }
+
+/**
+ * Whether to go on starting a ticket with `count` images: yes when the model
+ * can see them or there are none, otherwise the user confirms the warning.
+ */
+export function confirmStart(state: AppState | null, agent: AgentKind, model: string, count: number): boolean {
+  return !count || seesImages(state, agent, model) || confirm(`${blindWarning(count)}\n\nStart anyway?`);
+}

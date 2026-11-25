@@ -218,11 +218,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// The rows cascade; the files (images, uploads, run artifacts) do not.
-	for _, f := range files {
-		if err := os.Remove(s.Orch.ArtifactPath(f)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			s.Log.Warn("remove project file", "project", id, "file", f, "err", err)
-		}
-	}
+	s.Orch.RemoveArtifactFiles(files...)
 	return ok(w, map[string]bool{"deleted": true})
 }
 

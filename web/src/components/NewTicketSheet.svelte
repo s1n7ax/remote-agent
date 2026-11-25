@@ -3,7 +3,7 @@
   import { api } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { errorText } from '../lib/format';
-  import { blindWarning, filesOf, pastedFiles, prepareImage, refusal, seesImages } from '../lib/images';
+  import { confirmStart, filesOf, pastedFiles, prepareImage, refusal } from '../lib/images';
   import { router } from '../lib/router.svelte';
   import type { AgentKind, Project } from '../lib/types';
   import AgentPickers from './AgentPickers.svelte';
@@ -65,13 +65,15 @@
   let queuedFor: number | null = null;
   $effect(() => {
     const id = project.id;
-    if (queuedFor !== null && id !== queuedFor) {
-      for (const q of untrack(() => queued)) URL.revokeObjectURL(q.url);
-      queued = [];
-      refused = null;
-    }
+    if (queuedFor !== null && id !== queuedFor) untrack(clearQueue);
     queuedFor = id;
   });
+
+  function clearQueue() {
+    for (const q of queued) URL.revokeObjectURL(q.url);
+    queued = [];
+    refused = null;
+  }
 
   function unqueue(key: number) {
     const q = queued.find((x) => x.key === key);
@@ -88,8 +90,7 @@
 
   async function create(start: boolean) {
     if (!idea.trim() || uploading || failed) return;
-    const n = queued.length;
-    if (start && n && !seesImages(app.state, agent, model) && !confirm(`${blindWarning(n)}\n\nStart anyway?`)) return;
+    if (start && !confirmStart(app.state, agent, model, queued.length)) return;
     busy = true;
     const images = queued.map((q) => q.id!);
     const t = await app.attempt(
@@ -99,9 +100,7 @@
     busy = false;
     if (!t) return;
     idea = '';
-    for (const q of queued) URL.revokeObjectURL(q.url);
-    queued = [];
-    refused = null;
+    clearQueue();
     prototypes = false;
     ({ agent, model, effort } = project);
     open = false;

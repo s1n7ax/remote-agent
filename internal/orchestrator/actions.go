@@ -66,13 +66,13 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if in.Start {
 		t.Status = domain.StatusReady
 	}
-	if len(in.Images) > domain.MaxTicketImages {
-		return domain.Ticket{}, invalid("%v", store.ErrTooManyImages)
-	}
 	// The images go in with the ticket, so a ready ticket's first run
 	// never starts without them.
 	t, err = o.st.CreateTicketWithImages(ctx, t, in.Images)
-	if errors.Is(err, store.ErrNotFound) {
+	switch {
+	case errors.Is(err, store.ErrTooManyImages):
+		return domain.Ticket{}, invalid("%v", err)
+	case errors.Is(err, store.ErrNotFound):
 		return t, invalid("an image upload is missing or expired; add the image again")
 	}
 	if err != nil {

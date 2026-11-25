@@ -2,6 +2,7 @@
 // Enabled by `?mock` in the URL or VITE_MOCK=1.
 
 import { ApiError, setArtifactResolver, setEventSource, setTransport, type Transport } from './api';
+import { MAX_IMAGE_MB, MAX_IMAGES } from './images';
 import { progress } from './questions';
 import type {
   Account,
@@ -577,7 +578,7 @@ function storeImage(body: unknown): TicketImage {
   if (!(file instanceof File)) throw new ApiError(400, 'no image in the request (form field "file")');
   if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type))
     throw new ApiError(400, 'invalid request: only images (JPEG, PNG, WebP, GIF) can be attached');
-  if (file.size > 20 << 20) throw new ApiError(400, 'invalid request: each image can be at most 20 MB');
+  if (file.size > MAX_IMAGE_MB << 20) throw new ApiError(400, `invalid request: each image can be at most ${MAX_IMAGE_MB} MB`);
   const id = `img-${++imageSeq}`;
   artifacts[id] = URL.createObjectURL(file);
   return { n: 0, artifactId: id, name: file.name, mime: file.type, size: file.size, createdAt: new Date().toISOString() };
@@ -585,7 +586,7 @@ function storeImage(body: unknown): TicketImage {
 
 function attach(ticketId: number, im: TicketImage): TicketImage {
   const list = (images[ticketId] ??= []);
-  if (list.filter((x) => !x.removed).length >= 10) throw new ApiError(400, 'invalid request: a ticket can have at most 10 images');
+  if (list.filter((x) => !x.removed).length >= MAX_IMAGES) throw new ApiError(400, `invalid request: a ticket can have at most ${MAX_IMAGES} images`);
   const out = { ...im, n: (list.at(-1)?.n ?? 0) + 1 };
   list.push(out);
   return out;

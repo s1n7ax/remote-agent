@@ -13,7 +13,7 @@
   import { api, subscribe } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { clock, errorText, relative, toLocalInput, usd } from '../lib/format';
-  import { blindWarning, seesImages } from '../lib/images';
+  import { confirmStart } from '../lib/images';
   import { progress } from '../lib/questions';
   import { href, router } from '../lib/router.svelte';
   import { STATUS_LABEL, type Project, type PullRequest, type Round, type Ticket, type TicketDetail } from '../lib/types';
@@ -119,8 +119,7 @@
   // Starting a ticket whose model cannot see its images needs a confirm.
   function start() {
     if (!t || !detail) return;
-    const n = detail.images.length;
-    if (n && !seesImages(app.state, t.agent, t.model) && !confirm(`${blindWarning(n)}\n\nStart anyway?`)) return;
+    if (!confirmStart(app.state, t.agent, t.model, detail.images.length)) return;
     act(() => api.start(ticketId), 'Started');
   }
 

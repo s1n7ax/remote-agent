@@ -100,7 +100,7 @@ func (o *Orchestrator) UploadImage(ctx context.Context, projectID int64, r io.Re
 	if err != nil {
 		return "", err
 	}
-	if _, err := o.st.AddUpload(ctx, store.Upload{ID: a.ID, ProjectID: projectID, Name: a.Name, MIME: a.MIME, Size: a.Size, CreatedAt: o.now()}); err != nil {
+	if err := o.st.AddUpload(ctx, store.Upload{ID: a.ID, ProjectID: projectID, Name: a.Name, MIME: a.MIME, Size: a.Size, CreatedAt: o.now()}); err != nil {
 		_ = os.Remove(o.ArtifactPath(a.ID))
 		return "", err
 	}
@@ -144,9 +144,7 @@ func (o *Orchestrator) RemoveImage(ctx context.Context, ticketID int64, n int) e
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(o.ArtifactPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		o.log.Warn("remove image file", "ticket", ticketID, "image", n, "err", err)
-	}
+	o.RemoveArtifactFiles(id)
 	o.syncIssue(ctx, t)
 	return nil
 }
@@ -160,8 +158,16 @@ func (o *Orchestrator) removeImageFiles(ctx context.Context, ticketID int64) {
 		return
 	}
 	for _, im := range ims {
-		if err := os.Remove(o.ArtifactPath(im.ArtifactID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			o.log.Warn("remove image file", "ticket", ticketID, "image", im.N, "err", err)
+		o.RemoveArtifactFiles(im.ArtifactID)
+	}
+}
+
+// RemoveArtifactFiles deletes the files of artifacts (or uploads) whose rows
+// are gone or about to go; a file already missing is fine.
+func (o *Orchestrator) RemoveArtifactFiles(ids ...string) {
+	for _, id := range ids {
+		if err := os.Remove(o.ArtifactPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			o.log.Warn("remove artifact file", "id", id, "err", err)
 		}
 	}
 }
@@ -179,11 +185,7 @@ func (o *Orchestrator) cleanUploads(ctx context.Context) error {
 		return nil
 	}
 	ids, err := o.st.DeleteUploadsBefore(ctx, o.now().Add(-uploadTTL))
-	for _, id := range ids {
-		if rerr := os.Remove(o.ArtifactPath(id)); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-			o.log.Warn("remove stale upload", "id", id, "err", rerr)
-		}
-	}
+	o.RemoveArtifactFiles(ids...)
 	return err
 }
 
