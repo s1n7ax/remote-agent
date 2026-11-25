@@ -145,15 +145,13 @@ func (o *Orchestrator) ToolSubmitRequirement(ctx context.Context, runID int64, m
 	if strings.TrimSpace(markdown) == "" {
 		return invalid("the requirement is empty")
 	}
-	t, err := o.st.Ticket(ctx, ar.ticket.ID)
+	t, err := o.mutate(ctx, ar.ticket.ID, func(t *domain.Ticket) {
+		t.Requirement = markdown
+		if title := requirementTitle(markdown); title != "" {
+			t.Title = title
+		}
+	})
 	if err != nil {
-		return err
-	}
-	t.Requirement = markdown
-	if title := requirementTitle(markdown); title != "" {
-		t.Title = title
-	}
-	if err := o.save(ctx, &t); err != nil {
 		return err
 	}
 	if t.Issue != 0 {
@@ -184,12 +182,8 @@ func (o *Orchestrator) ToolSubmitDecisions(ctx context.Context, runID int64, mar
 	if err != nil {
 		return err
 	}
-	t, err := o.st.Ticket(ctx, ar.ticket.ID)
-	if err != nil {
-		return err
-	}
-	t.Decisions = markdown
-	return o.save(ctx, &t)
+	_, err = o.mutate(ctx, ar.ticket.ID, func(t *domain.Ticket) { t.Decisions = markdown })
+	return err
 }
 
 // ToolSubmitPrototypes stores the prototypes the user will pick from.
@@ -371,9 +365,10 @@ func (o *Orchestrator) ToolOpenPR(ctx context.Context, runID int64, title, body 
 		if err != nil {
 			return PullState{}, err
 		}
-		t.PR = n
-		t.Branch = branch
-		if err := o.save(ctx, &t); err != nil {
+		if t, err = o.mutate(ctx, t.ID, func(t *domain.Ticket) {
+			t.PR = n
+			t.Branch = branch
+		}); err != nil {
 			return PullState{}, err
 		}
 		ar.ticket.PR = n

@@ -168,10 +168,16 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	startedAt := o.now()
 	ar.run.StartedAt = &startedAt
 	_ = o.st.UpdateRun(ctx, ar.run)
-	t.Status = domain.StatusWorking
-	t.StatusNote = ""
-	if err := o.save(ctx, &t); err != nil {
+	// The agent is already running and may have saved the ticket through a
+	// tool call, so update the current row rather than our copy.
+	if cur, err := o.mutate(ctx, t.ID, func(c *domain.Ticket) {
+		c.Status = domain.StatusWorking
+		c.StatusNote = ""
+		c.Branch = t.Branch // set by prepareWorkspace
+	}); err != nil {
 		o.log.Error("save ticket", "err", err)
+	} else {
+		t = cur
 	}
 	ar.ticket = t
 	o.event(ctx, ar, domain.EventSystem, fmt.Sprintf("started %s stage with %s %s %s", t.Stage, kind, t.Model, t.Effort))

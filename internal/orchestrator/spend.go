@@ -63,13 +63,10 @@ func (o *Orchestrator) addCost(ctx context.Context, ar *activeRun, usd float64) 
 	if _, err := o.st.AddSpend(ctx, o.today(), usd); err != nil {
 		o.log.Error("book spend", "err", err)
 	}
-	t, err := o.st.Ticket(ctx, ar.ticket.ID)
+	t, err := o.mutate(ctx, ar.ticket.ID, func(t *domain.Ticket) { t.SpendUSD += usd })
 	if err != nil {
-		return
-	}
-	t.SpendUSD += usd
-	if err := o.st.UpdateTicket(ctx, &t); err != nil {
 		o.log.Error("book ticket spend", "err", err)
+		return
 	}
 	ar.ticket.SpendUSD = t.SpendUSD
 	if reason := o.overCap(ctx, t); reason != "" {

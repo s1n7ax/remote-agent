@@ -83,6 +83,10 @@ type Orchestrator struct {
 	kick    chan struct{}
 	browser chan struct{} // one slot: runs that drive a browser
 
+	// tmu serialises mutate's read-modify-write of ticket rows, which
+	// the run watcher, MCP tool calls and the API make concurrently.
+	tmu sync.Mutex
+
 	mu       sync.Mutex
 	active   map[int64]*activeRun // by ticket id
 	byRun    map[int64]*activeRun
@@ -320,6 +324,19 @@ func (o *Orchestrator) save(ctx context.Context, t *domain.Ticket) error {
 	}
 	o.bus.Publish(Message{Type: "ticket", ProjectID: t.ProjectID, TicketID: t.ID, Data: t})
 	return nil
+}
+
+// mutate applies f to the ticket's current row and saves it, so concurrent
+// writers of different fields do not overwrite each other.
+func (o *Orchestrator) mutate(ctx context.Context, id int64, f func(*domain.Ticket)) (domain.Ticket, error) {
+	o.tmu.Lock()
+	defer o.tmu.Unlock()
+	t, err := o.st.Ticket(ctx, id)
+	if err != nil {
+		return t, err
+	}
+	f(&t)
+	return t, o.save(ctx, &t)
 }
 
 func (o *Orchestrator) notify(ctx context.Context, ev domain.NotifyEvent, t domain.Ticket, body string) {
