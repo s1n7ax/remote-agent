@@ -82,6 +82,7 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 			return mcp.Register(mcpserver.Run{ID: ri.RunID, TicketID: ri.TicketID, Stage: ri.Stage, Workdir: ri.Workdir, Root: ri.ProjectDir})
 		},
 		Revoke: mcp.Revoke,
+		CIPoll: time.Duration(cfg.CIPollSeconds) * time.Second,
 	}
 	if cfg.Sandbox {
 		opts.Sandbox = func(projectDir, workdir string, ro []string) func(argv, env []string) ([]string, []string) {

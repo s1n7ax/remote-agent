@@ -25,6 +25,8 @@ type Config struct {
 	PreviewListen   string `json:"previewListen"`
 	DataDir         string `json:"dataDir"`
 	MaxParallelRuns int    `json:"maxParallelRuns"`
+	// CIPollSeconds is how often waiting PRs are polled (default 60).
+	CIPollSeconds int `json:"ciPollSeconds"`
 
 	GitHubTokenFile   string `json:"githubTokenFile"`
 	GitHubAPIURL      string `json:"githubApiUrl"`

@@ -306,7 +306,9 @@ func (o *Orchestrator) stopAll() {
 	}
 	o.mu.Unlock()
 	for _, r := range runs {
+		r.mu.Lock()
 		r.shutdown = true
+		r.mu.Unlock()
 		_ = r.sess.Stop()
 	}
 }

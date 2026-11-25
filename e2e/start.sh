@@ -9,6 +9,9 @@ gh_port=${GH_PORT:-17800}
 mkdir -p "$dir/repos" "$dir/data"
 : "${RA_BIN:=$dir/remote-agent}"
 : "${FAKEGH_BIN:=$dir/fakegithub}"
+if [ ! -f "$here/../web/dist/index.html" ]; then
+  (cd "$here/../web" && npm ci --no-audit --no-fund && npm run build) >&2
+fi
 [ -x "$RA_BIN" ] || go build -o "$RA_BIN" "$here/../cmd/remote-agent"
 [ -x "$FAKEGH_BIN" ] || go build -o "$FAKEGH_BIN" "$here/fakegithub"
 echo fake-token > "$dir/gh-token"
@@ -24,10 +27,11 @@ cat > "$dir/config.json" <<JSON
   "gitUrl": "http://127.0.0.1:$gh_port/git",
   "skillsSeedDir": "$here/../skills",
   "sandboxPath": "$PATH",
+  "ciPollSeconds": 1,
   "fakeAgents": true
 }
 JSON
-"$FAKEGH_BIN" -listen "127.0.0.1:$gh_port" -root "$dir/repos" -seed e2e/demo > "$dir/fakegithub.log" 2>&1 &
+"$FAKEGH_BIN" -listen "127.0.0.1:$gh_port" -root "$dir/repos" -seed e2e/demo,e2e/other > "$dir/fakegithub.log" 2>&1 &
 echo $! > "$dir/fakegithub.pid"
 FAKE_AGENT_SCRIPT_DIR="$here/agents" "$RA_BIN" serve --config "$dir/config.json" > "$dir/app.log" 2>&1 &
 echo $! > "$dir/app.pid"

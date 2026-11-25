@@ -576,8 +576,11 @@ func TestOnlyUserMerges(t *testing.T) {
 	}
 	h.gh.setCI(got.PR, "success") // nothing in the flow merges on green either
 	h.waitState(tk.ID, domain.StatusReady, domain.StageVerify)
-	rv := h.nextRun()
-	rv.Sess.Stop()
+	h.nextRun()
+	if err := h.o.Stop(ctx, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.waitState(tk.ID, domain.StatusBacklog, domain.StageVerify)
 	h.waitInactive(tk.ID)
 	if m := h.gh.mergeCalls(); len(m) != 0 {
 		t.Fatalf("merged without the user: %v", m)

@@ -51,6 +51,16 @@
     app.load();
   });
 
+  // A project added elsewhere (another device, the API) is not in the loaded
+  // state yet: reload once per unknown id before showing "not found".
+  let reloadedFor = -1;
+  $effect(() => {
+    if (app.state && projectId !== null && !project && reloadedFor !== projectId) {
+      reloadedFor = projectId;
+      app.load();
+    }
+  });
+
   // New screen starts at the top; switching tabs inside a ticket keeps the scroll position.
   const screenKey = $derived(route.name === 'ticket' ? `ticket/${route.ticketId}` : JSON.stringify(route));
   $effect(() => {
