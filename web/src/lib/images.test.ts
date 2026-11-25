@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blindWarning, isHeic, MAX_IMAGES, NOT_IMAGE, refusal, seesImages, TOO_BIG, TOO_MANY } from './images';
+import { blindWarning, isHeic, pastedFiles, MAX_IMAGES, NOT_IMAGE, refusal, seesImages, TOO_BIG, TOO_MANY } from './images';
 import type { AppState } from './types';
 
 const file = (name: string, type: string, size = 10) => new File([new Uint8Array(size)], name, { type });
@@ -40,5 +40,13 @@ describe('image checks', () => {
     expect(seesImages({ imageModels: { pi: null } } as unknown as AppState, 'pi', 'x')).toBe(false);
     expect(blindWarning(1)).toContain('your 1 image but');
     expect(blindWarning(3)).toContain('your 3 images');
+  });
+
+  it('leaves a paste that carries text alone', () => {
+    const img = file('a.png', 'image/png');
+    const paste = (types: string[]) => ({ types, files: [img] }) as unknown as DataTransfer;
+    expect(pastedFiles(paste(['Files']))).toEqual([img]);
+    expect(pastedFiles(paste(['text/plain', 'Files']))).toEqual([]);
+    expect(pastedFiles(null)).toEqual([]);
   });
 });

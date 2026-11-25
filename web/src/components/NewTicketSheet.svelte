@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { api } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { errorText } from '../lib/format';
-  import { blindWarning, filesOf, prepareImage, refusal, seesImages } from '../lib/images';
+  import { blindWarning, filesOf, pastedFiles, prepareImage, refusal, seesImages } from '../lib/images';
   import { router } from '../lib/router.svelte';
   import type { AgentKind, Project } from '../lib/types';
   import AgentPickers from './AgentPickers.svelte';
@@ -59,6 +60,19 @@
     if (input) input.value = '';
   }
 
+  // Uploads belong to the project they were made in; the sheet outlives a
+  // project switch, so drop them then.
+  let queuedFor: number | null = null;
+  $effect(() => {
+    const id = project.id;
+    if (queuedFor !== null && id !== queuedFor) {
+      for (const q of untrack(() => queued)) URL.revokeObjectURL(q.url);
+      queued = [];
+      refused = null;
+    }
+    queuedFor = id;
+  });
+
   function unqueue(key: number) {
     const q = queued.find((x) => x.key === key);
     if (q) URL.revokeObjectURL(q.url);
@@ -66,7 +80,7 @@
   }
 
   function onpaste(e: ClipboardEvent) {
-    const files = filesOf(e.clipboardData);
+    const files = pastedFiles(e.clipboardData);
     if (!files.length) return;
     e.preventDefault();
     addFiles(files);

@@ -52,9 +52,19 @@ export async function prepareImage(file: File): Promise<File> {
   }
 }
 
-/** The files in a paste or drop. */
+/** The files in a drop. */
 export function filesOf(data: DataTransfer | null): File[] {
   return data ? Array.from(data.files) : [];
+}
+
+/**
+ * The images to attach from a paste: its files, unless it also carries text
+ * (Office apps put a picture of copied cells next to the text), in which
+ * case the paste is left to insert the text.
+ */
+export function pastedFiles(data: DataTransfer | null): File[] {
+  if (!data || data.types.includes('text/plain')) return [];
+  return filesOf(data);
 }
 
 /** Whether an agent running `model` can look at images (see AppState.imageModels). */

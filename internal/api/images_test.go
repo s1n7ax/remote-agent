@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -97,6 +99,19 @@ func TestImageUploadEndpoints(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || !bytes.Equal(w.Body.Bytes(), png) {
 		t.Fatalf("artifact = %d %s", w.Code, w.Header().Get("Content-Type"))
+	}
+
+	// Deleting the project removes its image files and pending uploads.
+	body, ct = form("pending.png", png)
+	_, out = do("POST", "/api/projects/"+itoa(p.ID)+"/uploads", body, ct)
+	pending := out["id"].(string)
+	if code, out = do("DELETE", "/api/projects/"+itoa(p.ID), nil, ""); code != http.StatusOK {
+		t.Fatalf("delete project = %d %v", code, out)
+	}
+	for _, id := range []string{art, pending} {
+		if _, err := os.Stat(o.ArtifactPath(id)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("file %s survived its project: %v", id, err)
+		}
 	}
 }
 

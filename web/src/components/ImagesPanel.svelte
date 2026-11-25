@@ -2,7 +2,7 @@
   import { api } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { errorText } from '../lib/format';
-  import { filesOf, prepareImage, refusal } from '../lib/images';
+  import { filesOf, pastedFiles, prepareImage, refusal } from '../lib/images';
   import type { TicketImage } from '../lib/types';
   import Gallery from './Gallery.svelte';
   import Icon from './Icon.svelte';
@@ -40,7 +40,7 @@
   }
 
   function onpaste(e: ClipboardEvent) {
-    const files = filesOf(e.clipboardData);
+    const files = pastedFiles(e.clipboardData);
     if (!files.length) return;
     e.preventDefault();
     add(files);

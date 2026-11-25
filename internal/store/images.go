@@ -181,3 +181,23 @@ func (s *Store) RemoveTicketImage(ctx context.Context, ticketID int64, n int) (s
 	}
 	return id, nil
 }
+
+// ProjectFiles lists the artifact and upload ids of a project's tickets, so
+// the caller can remove their files when the project is deleted.
+func (s *Store) ProjectFiles(ctx context.Context, projectID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM artifacts a JOIN tickets t ON t.id = a.ticket_id WHERE t.project_id = ?
+		UNION SELECT id FROM uploads WHERE project_id = ?`, projectID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project files: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan project file: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
