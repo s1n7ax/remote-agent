@@ -22,13 +22,15 @@ const sessionCookie = "ra_session"
 type Auth struct {
 	// Token is the login token; empty disables authentication (tests only).
 	Token string
-	// Secret signs session cookies; rotating it signs every browser out.
+	// Secret signs session cookies.
 	Secret []byte
 }
 
+// session is the cookie value. It is bound to the login token, so replacing
+// the token file (and restarting) signs every browser out.
 func (a *Auth) session() string {
 	m := hmac.New(sha256.New, a.Secret)
-	m.Write([]byte("session"))
+	m.Write([]byte("session\x00" + a.Token))
 	return hex.EncodeToString(m.Sum(nil))
 }
 

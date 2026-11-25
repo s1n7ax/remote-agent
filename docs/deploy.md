@@ -96,6 +96,27 @@ systemctl restart remote-agent
 systemctl status remote-agent
 ```
 
+### GitHub token and repository settings
+
+Agents never get the token. But CI on GitHub runs whatever code they push, so set up each repository so that CI cannot do what the app forbids, such as merging or pushing to the default branch.
+
+The fine-grained PAT, limited to the repositories you add as projects, needs these repository permissions:
+
+- **Contents:** read and write (push ticket branches).
+- **Pull requests:** read and write.
+- **Issues:** read and write.
+- **Commit statuses:** read.
+- **Actions:** read (CI logs).
+- **Checks:** read.
+- **Metadata:** read.
+
+Do **not** grant **Workflows**: without it, GitHub rejects any push that changes `.github/workflows`. The app also refuses agent pushes that touch `.github/`.
+
+In each repository:
+
+- **Settings → Actions → General → Workflow permissions:** choose **Read repository contents** (a read-only `GITHUB_TOKEN`), and leave "Allow GitHub Actions to create and approve pull requests" off.
+- **Settings → Branches:** protect the default branch. Require a pull request, and do not let the Actions bot bypass the rule.
+
 The service does not start until `githubTokenFile` exists. Set
 `openrouterKeyFile = null` if you do not use Pi. Claude accounts are added in
 the app (Accounts), not here.

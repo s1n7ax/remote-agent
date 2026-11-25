@@ -42,7 +42,7 @@
   });
 
   $effect(() => {
-    if (route.name === 'home' && app.state && !location.hash.startsWith('#/login')) {
+    if (route.name === 'home' && app.state) {
       if (fallback) router.go({ name: 'board', projectId: fallback.id }, true);
       else switching = true;
     }

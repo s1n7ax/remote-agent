@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -173,13 +175,12 @@ func (b *Bench) run(ctx context.Context, snap, name string, env []string) Result
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = work
 	cmd.Env = env
-	if log, err := cmd.CombinedOutput(); err != nil {
-		if _, statErr := os.Stat(out); statErr != nil {
-			r.Error = fmt.Sprintf("%v: %s", err, tail(string(log), 2000))
-			return r
-		}
+	log, runErr := cmd.CombinedOutput()
+	raw, err := readResult(work, filepath.Base(out))
+	if err != nil && runErr != nil {
+		r.Error = fmt.Sprintf("%v: %s", runErr, tail(string(log), 2000))
+		return r
 	}
-	raw, err := os.ReadFile(out)
 	if err != nil {
 		r.Error = err.Error()
 		return r
@@ -191,6 +192,30 @@ func (b *Bench) run(ctx context.Context, snap, name string, env []string) Result
 	}
 	parsed.Skill, parsed.StartedAt = name, r.StartedAt
 	return parsed
+}
+
+// readResult reads the eval's output from its sandbox-writable work dir
+// without following symlinks out of it or blocking on a planted FIFO.
+func readResult(work, name string) ([]byte, error) {
+	root, err := os.OpenRoot(work)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", name)
+	}
+	const limit = 16 << 20
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err == nil && len(raw) > limit {
+		err = fmt.Errorf("%s is larger than 16 MB", name)
+	}
+	return raw, err
 }
 
 func tail(s string, n int) string {

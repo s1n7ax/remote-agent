@@ -31,6 +31,7 @@ test('a ticket goes from idea to merged', async ({ page, request }) => {
   await expect(page.getByText('wrong login token')).toBeVisible();
   await page.goto(`/#/login?token=${token}`);
   await expect(page.getByRole('dialog', { name: 'Projects' })).toBeVisible();
+  expect(page.url()).not.toContain(token); // the pairing token leaves the address bar
 
   // Add a project through the UI, then the demo project (fake agent) via the API.
   // With no projects the Projects sheet opens on its own.

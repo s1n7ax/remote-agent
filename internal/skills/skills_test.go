@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -103,5 +104,30 @@ func TestParseEval(t *testing.T) {
 	r, _ = ParseEval([]byte(`{"cases":[{"name":"a","aggregates":{"score":0.95,"scoreWithout":0.9}}]}`))
 	if r.Verdict != "remove" {
 		t.Fatalf("verdict %s", r.Verdict)
+	}
+}
+
+func TestReadResultRefusesEscapesAndFIFOs(t *testing.T) {
+	work, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(work, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readResult(work, "link.json"); err == nil {
+		t.Fatal("followed a symlink out of the work dir")
+	}
+	if err := syscall.Mkfifo(filepath.Join(work, "fifo.json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readResult(work, "fifo.json"); err == nil {
+		t.Fatal("read a FIFO")
+	}
+	if err := os.WriteFile(filepath.Join(work, "ok.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := readResult(work, "ok.json"); err != nil || string(raw) != "{}" {
+		t.Fatalf("regular file: %q %v", raw, err)
 	}
 }

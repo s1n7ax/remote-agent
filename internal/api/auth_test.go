@@ -52,6 +52,10 @@ func TestAuth(t *testing.T) {
 		}
 		return w
 	}
+	rotated := &Auth{Token: "new", Secret: a.Secret}
+	if rotated.session() == a.session() {
+		t.Fatal("a new login token must invalidate old sessions")
+	}
 	if w := login("wrong"); w.Code != 401 || len(w.Result().Cookies()) != 0 {
 		t.Fatalf("wrong token: %d %v", w.Code, w.Result().Cookies())
 	}

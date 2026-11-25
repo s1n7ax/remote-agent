@@ -1,6 +1,7 @@
 // Global app state loaded from /api/state.
 
 import { api, onUnauthorized } from './api';
+import { dropPairing } from './pairing';
 import { errorText } from './format';
 import type { AgentKind, AppState, Project } from './types';
 
@@ -48,6 +49,7 @@ class App {
       st.efforts ??= {};
       this.state = st;
       this.error = null;
+      dropPairing(); // signed in already: a pairing token is not needed
     } catch (e) {
       if (!this.needsLogin) this.error = errorText(e);
     }

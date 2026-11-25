@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { errorText } from '../lib/format';
+  import { onPairing } from '../lib/pairing';
 
   let token = $state('');
   let busy = $state(false);
@@ -21,23 +22,13 @@
     }
   }
 
-  // A pairing link (#/login?token=…) signs in with one tap; the token is
-  // dropped from the address bar and history right away.
-  function fromLink() {
-    const m = /^#\/login\?(.*)$/.exec(location.hash);
-    const t = m ? new URLSearchParams(m[1]).get('token') : null;
-    if (t) {
-      history.replaceState(null, '', '#/');
+  // A pairing link signs in with one tap (see lib/pairing.ts).
+  onMount(() =>
+    onPairing((t) => {
       token = t;
       void submit();
-    }
-  }
-
-  onMount(() => {
-    fromLink();
-    window.addEventListener('hashchange', fromLink);
-    return () => window.removeEventListener('hashchange', fromLink);
-  });
+    }),
+  );
 </script>
 
 <div class="page">

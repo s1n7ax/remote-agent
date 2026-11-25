@@ -1,8 +1,10 @@
 import { mount } from 'svelte';
 import './app.css';
 import App from './App.svelte';
+import { initPairing } from './lib/pairing';
 import { applyTheme, getTheme } from './lib/theme';
 
+initPairing();
 applyTheme(getTheme());
 const mock = import.meta.env.VITE_MOCK === '1' || new URLSearchParams(location.search).has('mock');
 if (mock) (await import('./lib/mock')).installMock();
