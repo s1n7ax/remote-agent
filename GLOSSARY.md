@@ -19,6 +19,10 @@ _Avoid_: cron, scheduled task
 **Schedule**:
 A cron expression and prompt that creates a job each time it fires.
 
+**Ticket image**:
+An image the user attached to a ticket, numbered in the order it was added, that every later run of the ticket can look at. It stays on the board and never goes to GitHub.
+_Avoid_: attachment, screenshot (screenshots are files a run uploads)
+
 **Stage**:
 The /ship step a ticket is in: explore, design, build, ci, fix, verify, merged or job.
 _Avoid_: phase, step
