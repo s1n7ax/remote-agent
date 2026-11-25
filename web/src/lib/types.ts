@@ -77,6 +77,27 @@ export interface Ticket {
   updatedAt: string;
 }
 
+/** How a linked ticket relates to the ticket it is seen from. */
+export type LinkKind = 'depends_on' | 'blocks' | 'related';
+
+export const LINK_LABEL: Record<LinkKind, string> = {
+  depends_on: 'Depends on',
+  blocks: 'Blocks',
+  related: 'Related to',
+};
+
+/** One link as seen from one of its tickets; the fields describe the other ticket. */
+export interface TicketLink {
+  id: number;
+  kind: LinkKind;
+  ticketId: number;
+  title: string;
+  issue?: number;
+  status?: Status; // absent once deleted
+  statusNote?: string;
+  deleted?: boolean;
+}
+
 export type QuestionKind = 'single' | 'multi' | 'text' | 'confirm';
 
 export interface Preview {
@@ -335,6 +356,7 @@ export interface TicketDetail {
   rounds: Round[];
   runs: Run[];
   prototypes: Prototype[];
+  links: TicketLink[];
   proof?: Proof;
   preview?: PreviewInfo;
 }
@@ -392,6 +414,8 @@ export interface TicketInput {
   prototypes: boolean;
   start?: boolean;
   startAt?: string;
+  dependsOn?: number[];
+  related?: number[];
 }
 
 export interface TicketPatch {
@@ -417,4 +441,5 @@ export interface SettingsPatch {
 export type ServerEvent =
   | { type: 'ticket'; projectId: number; ticketId: number; data: Ticket }
   | { type: 'run_event'; projectId: number; ticketId: number; data: RunEvent }
-  | { type: 'board'; projectId: number; ticketId?: number; data?: unknown };
+  | { type: 'board'; projectId: number; ticketId?: number; data?: unknown }
+  | { type: 'links'; projectId: number; ticketId: number };

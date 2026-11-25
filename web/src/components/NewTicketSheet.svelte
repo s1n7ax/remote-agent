@@ -2,8 +2,9 @@
   import { api } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { router } from '../lib/router.svelte';
-  import type { AgentKind, Project } from '../lib/types';
+  import type { AgentKind, LinkKind, Project, Ticket, TicketLink } from '../lib/types';
   import AgentPickers from './AgentPickers.svelte';
+  import LinkEditor from './LinkEditor.svelte';
   import Sheet from './Sheet.svelte';
 
   let { open = $bindable(false), project, oncreated }: { open?: boolean; project: Project; oncreated: () => void } = $props();
@@ -15,18 +16,39 @@
   let effort = $derived(project.effort);
   let prototypes = $state(false);
   let busy = $state(false);
+  // Links to add with the ticket; ids are local only.
+  let links = $state<TicketLink[]>([]);
+
+  function addLink(t: Ticket, kind: LinkKind) {
+    links.push({ id: links.length + 1, kind, ticketId: t.id, title: t.title, issue: t.issue, status: t.status });
+  }
+
+  function removeLink(l: TicketLink) {
+    links = links.filter((x) => x !== l);
+  }
 
   async function create(start: boolean) {
     if (!idea.trim()) return;
     busy = true;
     const t = await app.attempt(
-      () => api.createTicket(project.id, { idea: idea.trim(), agent, model, effort, prototypes, start }),
+      () =>
+        api.createTicket(project.id, {
+          idea: idea.trim(),
+          agent,
+          model,
+          effort,
+          prototypes,
+          start,
+          dependsOn: links.filter((l) => l.kind === 'depends_on').map((l) => l.ticketId),
+          related: links.filter((l) => l.kind === 'related').map((l) => l.ticketId),
+        }),
       start ? 'Ticket created and started' : 'Ticket created in backlog',
     );
     busy = false;
     if (!t) return;
     idea = '';
     prototypes = false;
+    links = [];
     ({ agent, model, effort } = project);
     open = false;
     oncreated();
@@ -47,6 +69,12 @@
       <span class="muted small">Build 2–3 options with screenshots and a live preview to pick from.</span>
     </span>
   </label>
+  {#if open}
+    <div class="field">
+      Links
+      <LinkEditor projectId={project.id} {links} kinds={['depends_on', 'related']} onadd={addLink} onremove={removeLink} />
+    </div>
+  {/if}
   {#snippet footer()}
     <button class="btn grow" type="button" disabled={busy || !idea.trim()} onclick={() => create(false)}>Create</button>
     <button class="btn primary grow" type="button" disabled={busy || !idea.trim()} onclick={() => create(true)}>Create &amp; start</button>
@@ -54,6 +82,13 @@
 </Sheet>
 
 <style>
+  .field {
+    display: grid;
+    gap: 6px;
+    font-size: 0.86rem;
+    color: var(--ink-2);
+    font-weight: 500;
+  }
   .toggle {
     display: flex;
     gap: 12px;

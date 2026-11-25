@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import AgentPickers from '../components/AgentPickers.svelte';
   import Icon from '../components/Icon.svelte';
+  import LinkEditor from '../components/LinkEditor.svelte';
   import LogTab from '../components/LogTab.svelte';
   import Markdown from '../components/Markdown.svelte';
   import PrPanel from '../components/PrPanel.svelte';
@@ -14,7 +15,7 @@
   import { clock, errorText, relative, toLocalInput, usd } from '../lib/format';
   import { progress } from '../lib/questions';
   import { href, router } from '../lib/router.svelte';
-  import { STATUS_LABEL, type Project, type PullRequest, type Round, type Ticket, type TicketDetail } from '../lib/types';
+  import { STATUS_LABEL, type LinkKind, type Project, type PullRequest, type Round, type Ticket, type TicketDetail, type TicketLink } from '../lib/types';
 
   let { project, ticketId, tab }: { project: Project; ticketId: number; tab: string } = $props();
 
@@ -31,6 +32,7 @@
       d.rounds ??= [];
       d.runs ??= [];
       d.prototypes ??= [];
+      d.links ??= [];
       detail = d;
       error = null;
     } catch (e) {
@@ -51,8 +53,33 @@
         detail.ticket = ev.data;
         if (changed) load();
       }
+      // A linked ticket changed: its title, status or the links themselves.
+      if (detail && ((ev.type === 'links' && ev.ticketId === ticketId) || (ev.type === 'ticket' && detail.links.some((l) => l.ticketId === ev.ticketId)))) {
+        refreshLinks();
+      }
     }),
   );
+
+  async function refreshLinks() {
+    try {
+      const d = await api.ticket(ticketId);
+      if (detail) detail.links = d.links ?? [];
+    } catch {
+      // the next event or reload tries again
+    }
+  }
+
+  async function addLink(to: Ticket, kind: LinkKind) {
+    const res = await app.attempt(() => api.addLink(ticketId, to.id, kind), 'Link added');
+    if (res && detail) detail.links = res.links ?? [];
+  }
+
+  async function removeLink(l: TicketLink) {
+    const res = await app.attempt(() => api.removeLink(ticketId, l.id), 'Link removed');
+    if (res && detail) detail.links = res.links ?? [];
+  }
+
+  const unmerged = $derived(detail?.links.filter((l) => l.kind === 'depends_on' && (l.deleted || l.status !== 'done')) ?? []);
 
   const t = $derived(detail?.ticket);
   const live = $derived(detail?.runs.filter((r) => ['queued', 'running', 'paused'].includes(r.status)).at(-1));
@@ -183,6 +210,13 @@
       </div>
     </section>
 
+    {#if t.kind !== 'job'}
+      <section class="panel" aria-label="Linked tickets">
+        <h2>Links</h2>
+        <LinkEditor projectId={project.id} selfId={t.id} links={detail.links} kinds={['depends_on', 'blocks', 'related']} onadd={addLink} onremove={removeLink} />
+      </section>
+    {/if}
+
     <nav class="tabs" aria-label="Ticket sections">
       {#each tabs as x (x.id)}
         <a class={{ on: tab === x.id }} href={href({ name: 'ticket', projectId: project.id, ticketId, tab: x.id })} aria-current={tab === x.id ? 'page' : undefined}>
@@ -217,6 +251,9 @@
       {#if !t.pr}
         <div class="empty"><p>No pull request yet.</p><p class="small">The build stage opens a draft PR.</p></div>
       {:else if pr}
+        {#if unmerged.length}
+          <p class="note bad">Not merged yet: {unmerged.map((l) => (l.issue ? `#${l.issue}` : `ticket ${l.ticketId}`)).join(', ')}, which this ticket depends on. Merging is still your call.</p>
+        {/if}
         <PrPanel {pr} projectId={project.id} onmerged={() => (load(), loadPr())} />
       {:else if prError}
         <div class="empty">
