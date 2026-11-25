@@ -66,7 +66,7 @@
     <input bind:this={input} type="file" accept="image/*" multiple hidden onchange={(e) => add(Array.from(e.currentTarget.files ?? []))} />
   </div>
   {#if images.length}
-    <Gallery ids={images.map((im) => im.artifactId)} numbers={images.map((im) => im.n)} label="Image" aspect="1" onremove={remove} />
+    <Gallery ids={images.map((im) => im.artifactId)} numbers={images.map((im) => im.n)} label="Image" aspect="1" min="76px" onremove={remove} />
   {:else}
     <p class="muted small">Screenshots or photos the agent should look at. Refer to them by number in your text.</p>
   {/if}

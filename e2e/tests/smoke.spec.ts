@@ -104,3 +104,53 @@ test('one tap removes a skill and Undo brings it back', async ({ page, request }
   await expect(remove).toBeVisible();
   expect(await names()).toContain('todo-comments');
 });
+
+// Runs after the tests above, which add the e2e/demo project.
+test('images go on a ticket and stay on the board', async ({ page, request }) => {
+  const projects = (await (await request.get('/api/projects', { headers })).json()) as { id: number; repo: string }[];
+  const project = projects.find((p) => p.repo === 'e2e/demo')!;
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const file = (name: string) => ({ name, mimeType: 'image/png', buffer: png });
+
+  await page.goto(`/#/login?token=${token}`);
+  await page.goto(`/#/p/${project.id}/board`);
+  await page.getByRole('button', { name: 'New ticket' }).click();
+  const sheet = page.getByRole('dialog', { name: 'New ticket' });
+  await sheet.getByPlaceholder(/What should change/).fill('The logo is blurry, see image 2');
+  await sheet.locator('input[type=file]').setInputFiles([file('a.png'), file('b.png')]);
+  await expect(sheet.getByRole('list', { name: 'Images' }).getByRole('listitem')).toHaveCount(2);
+  await sheet.locator('input[type=file]').setInputFiles({ name: 'doc.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7') });
+  await expect(sheet.getByText('Only images (JPEG, PNG, WebP, GIF) can be attached.')).toBeVisible();
+  await expect(sheet.getByText('Uploading…')).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(sheet).toBeHidden();
+
+  const board = (await (await request.get(`/api/projects/${project.id}/board`, { headers })).json()).columns.backlog as { id: number; title: string }[];
+  const id = board.find((t) => t.title.startsWith('The logo is blurry'))!.id;
+  await page.goto(`/#/p/${project.id}/t/${id}/requirement`);
+  const panel = page.getByRole('region', { name: 'Images' });
+  await expect(panel.getByRole('img')).toHaveCount(2);
+  await panel.locator('input[type=file]').setInputFiles(file('c.png'));
+  await expect(panel.getByRole('img', { name: 'Image 3' })).toBeVisible();
+  page.once('dialog', (d) => d.accept());
+  await panel.getByRole('button', { name: 'Remove image 2' }).click();
+  await expect(panel.getByRole('img')).toHaveCount(2);
+  await expect(panel.getByRole('img', { name: 'Image 3' })).toBeVisible();
+
+  // Over the API the server enforces the type itself.
+  const pdf = await request.post(`/api/tickets/${id}/images`, {
+    headers,
+    multipart: { file: { name: 'x.png', mimeType: 'image/png', buffer: Buffer.from('%PDF-1.7 not a png') } },
+  });
+  expect(pdf.status()).toBe(400);
+  expect((await pdf.json()).error).toContain('only images');
+
+  // The issue only counts the images.
+  const issueNo = (await ticket(request, id)).issue;
+  const body: string = (await github(request)).issues[issueNo].body;
+  expect(body).toContain('_2 images attached on the board._');
+  expect(body).not.toContain('/api/artifacts');
+});

@@ -8,6 +8,7 @@
     numbers,
     onremove,
     aspect = '9 / 16',
+    min = '120px',
   }: {
     ids: string[];
     label?: string;
@@ -16,6 +17,8 @@
     /** Adds a remove button per thumbnail. */
     onremove?: (index: number) => void;
     aspect?: string;
+    /** Smallest thumbnail width. */
+    min?: string;
   } = $props();
   const num = (i: number) => numbers?.[i] ?? i + 1;
   let zoomed = $state<string | null>(null);
@@ -28,7 +31,7 @@
   });
 </script>
 
-<div class="gallery">
+<div class="gallery" style:--min={min}>
   {#each ids as id, i (id)}
     <div class="item" style:aspect-ratio={aspect}>
       <button type="button" class="thumb" onclick={() => (zoomed = id)} aria-label="Zoom {label.toLowerCase()} {num(i)}">
@@ -52,7 +55,7 @@
 <style>
   .gallery {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--min), 1fr));
     gap: 8px;
   }
   .item {
