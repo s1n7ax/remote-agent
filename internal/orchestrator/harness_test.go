@@ -430,6 +430,7 @@ func (r *testRunner) Start(_ context.Context, spec agent.Spec) (agent.Session, e
 // ---------------------------------------------------------------- harness
 
 type harness struct {
+	stopped bool // set by withoutRun
 	t       *testing.T
 	ctx     context.Context
 	o       *Orchestrator
@@ -446,6 +447,10 @@ type harness struct {
 }
 
 type harnessOpt func(*harness, *Options)
+
+// withoutRun leaves the scheduler stopped, for tests that call its steps
+// (like migrateLayout) themselves and must not race it.
+func withoutRun() harnessOpt { return func(h *harness, _ *Options) { h.stopped = true } }
 
 func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	t.Helper()
@@ -520,6 +525,9 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	// aside files a test plants under projects/ before its first run.
 	if err := h.o.migrateLayout(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if h.stopped {
+		return h
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
