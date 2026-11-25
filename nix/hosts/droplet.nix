@@ -29,6 +29,10 @@
     system.stateVersion = "26.11";
     networking.hostName = "remote-agent";
 
+    droplet.sshKeys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGuG2s0tXyY7L8ncB5ojbbONVZE5+VtULm9yl8Ro0J5D s1n7ax@s1n7ax"
+    ];
+
     nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "claude-code";
 
     services.remote-agent = {
