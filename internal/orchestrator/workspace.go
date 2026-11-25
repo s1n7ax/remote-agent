@@ -430,7 +430,9 @@ func (o *Orchestrator) sandboxGitEnv() []string {
 		"GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"}
 }
 
-var gitPath = sync.OnceValue(func() string {
+// gitBin is git's resolved path, which sandboxes see through their
+// read-only system binds.
+var gitBin = sync.OnceValue(func() string {
 	p, err := exec.LookPath("git")
 	if err != nil {
 		return "git"
@@ -441,16 +443,17 @@ var gitPath = sync.OnceValue(func() string {
 	return p
 })
 
-// gitBin is git's resolved path, which sandboxes see through their
-// read-only system binds.
-func gitBin() string { return gitPath() }
-
-// git runs hardened git on the host.
-func git(ctx context.Context, args ...string) error {
+// hostGit is a hardened git command on the host.
+func hostGit(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, gitBin(), append(append([]string{}, hardening...), args...)...)
 	cmd.Env = gitEnv()
 	cmd.WaitDelay = gitWaitDelay
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// git runs hardened git on the host.
+func git(ctx context.Context, args ...string) error {
+	out, err := hostGit(ctx, args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
@@ -460,9 +463,7 @@ func git(ctx context.Context, args ...string) error {
 // gitOutput runs hardened git on the host in dir and returns its stdout.
 // dir must be the app's own repo/: never an agent-writable clone.
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, gitBin(), append(append([]string{}, hardening...), append([]string{"-C", dir}, args...)...)...)
-	cmd.Env = gitEnv()
-	cmd.WaitDelay = gitWaitDelay
+	cmd := hostGit(ctx, append([]string{"-C", dir}, args...)...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -477,10 +478,7 @@ func gitQuiet(ctx context.Context, dir string, args ...string) error {
 	if dir != "" {
 		args = append([]string{"-C", dir}, args...)
 	}
-	cmd := exec.CommandContext(ctx, gitBin(), append(append([]string{}, hardening...), args...)...)
-	cmd.Env = gitEnv()
-	cmd.WaitDelay = gitWaitDelay
-	return cmd.Run()
+	return hostGit(ctx, args...).Run()
 }
 
 // gitSandboxed runs hardened git in dir inside a sandbox seeing rw and ro
