@@ -1,7 +1,8 @@
 // Package sandbox builds the bubblewrap command a run executes in. The
 // sandbox sees only the directories it is given (read-write or read-only)
-// and read-only system paths; every namespace but the network is unshared
-// and the environment is exactly the one passed.
+// and read-only system paths; every namespace but the network (and, with
+// NoNetwork, the network too) is unshared and the environment is exactly
+// the one passed.
 package sandbox
 
 import (
@@ -40,6 +41,8 @@ type Config struct {
 	// ReadOnlyTry are bound read-only when present, after
 	// DefaultReadOnlyTry (e.g. the skills repo).
 	ReadOnlyTry []string
+	// NoNetwork unshares the network namespace too.
+	NoNetwork bool
 }
 
 // Command returns the bwrap argv running argv with exactly env (KEY=VALUE)
@@ -65,12 +68,11 @@ func (c Config) Command(argv, env []string) ([]string, error) {
 	// bwrap while the agent keeps running and spending. --new-session
 	// guards against TIOCSTI injection into a controlling terminal; agents
 	// have none (stdio are pipes, the app runs as a systemd service).
-	args := []string{
-		bwrap,
-		"--unshare-all", "--share-net",
-		"--die-with-parent",
-		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+	args := []string{bwrap, "--unshare-all"}
+	if !c.NoNetwork {
+		args = append(args, "--share-net")
 	}
+	args = append(args, "--die-with-parent", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp")
 	for _, p := range append(append([]string{}, DefaultReadOnly...), c.ReadOnly...) {
 		args = append(args, "--ro-bind", p, p)
 	}

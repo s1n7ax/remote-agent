@@ -56,6 +56,9 @@ type TicketContext struct {
 	Rounds     []domain.Round     `json:"rounds"`
 	Prototypes []domain.Prototype `json:"prototypes"`
 	Proof      *domain.Proof      `json:"proof,omitempty"`
+	// Images are the ticket's current images; a run gets them as files in
+	// .ship/<goal>/images/.
+	Images []domain.TicketImage `json:"images"`
 }
 
 // ToolTicket returns the run's ticket, its rounds (with answers) and proof.
@@ -85,7 +88,11 @@ func (o *Orchestrator) ticketContext(ctx context.Context, id int64) (TicketConte
 	if err != nil {
 		return tc, err
 	}
-	tc = TicketContext{Ticket: t, Project: p, Rounds: rds, Prototypes: ps}
+	ims, err := o.st.TicketImages(ctx, id)
+	if err != nil {
+		return tc, err
+	}
+	tc = TicketContext{Ticket: t, Project: p, Rounds: rds, Prototypes: ps, Images: ims}
 	if proof, ok, err := o.st.LatestProof(ctx, id); err == nil && ok {
 		tc.Proof = &proof
 	}
@@ -157,12 +164,7 @@ func (o *Orchestrator) ToolSubmitRequirement(ctx context.Context, runID int64, m
 	if err != nil {
 		return err
 	}
-	if t.Issue != 0 {
-		body := markdown + fmt.Sprintf("\n\n---\n_Original idea:_\n\n%s\n\n_Tracked by remote-agent (ticket %d)._", quote(t.Idea), t.ID)
-		if err := o.gh.UpdateIssueBody(ctx, ar.project.Repo, t.Issue, body); err != nil {
-			o.log.Warn("mirror requirement to issue", "err", err)
-		}
-	}
+	o.syncIssue(ctx, t)
 	return nil
 }
 

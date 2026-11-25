@@ -96,8 +96,11 @@ type Orchestrator struct {
 	byRun    map[int64]*activeRun
 	draining bool
 	lastCI   map[int64]time.Time
-	repoMu   map[int64]*sync.Mutex // serialises writes to a project's repo/
-	wg       sync.WaitGroup
+	// piImages holds the pi models that can look at images.
+	piImages        map[string]bool
+	lastUploadSweep time.Time
+	repoMu          map[int64]*sync.Mutex // serialises writes to a project's repo/
+	wg              sync.WaitGroup
 }
 
 // New returns an orchestrator; call Run to start it.
@@ -205,6 +208,7 @@ func (o *Orchestrator) step(ctx context.Context) {
 		"schedules": o.fireSchedules,
 		"timers":    o.releaseTimers,
 		"ci":        o.pollCI,
+		"uploads":   o.cleanUploads,
 	} {
 		if err := f(ctx); err != nil {
 			o.log.Error("scheduler step failed", "step", name, "err", err)

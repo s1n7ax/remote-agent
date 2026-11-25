@@ -27,9 +27,13 @@ func scanTicket(r interface{ Scan(...any) error }) (domain.Ticket, error) {
 
 // CreateTicket inserts t and returns it with its id.
 func (s *Store) CreateTicket(ctx context.Context, t domain.Ticket) (domain.Ticket, error) {
+	return insertTicket(ctx, s.db, t)
+}
+
+func insertTicket(ctx context.Context, db execer, t domain.Ticket) (domain.Ticket, error) {
 	t.CreatedAt = now()
 	t.UpdatedAt = t.CreatedAt
-	res, err := s.db.ExecContext(ctx, `INSERT INTO tickets(project_id, kind, title, idea, status, stage,
+	res, err := db.ExecContext(ctx, `INSERT INTO tickets(project_id, kind, title, idea, status, stage,
 		agent, model, effort, prototypes, issue, branch, pr, verified_sha, requirement, decisions, status_note, start_at,
 		wait_until, fix_rounds, spend_usd, spend_cap_usd, job_prompt, created_at, updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,

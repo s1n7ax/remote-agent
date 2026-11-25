@@ -33,7 +33,9 @@ func goalName(t domain.Ticket) string {
 // The checkout is agent-writable, so every write goes through an os.Root at
 // it and replaces what was there: a planted symlink is removed, not
 // followed.
-func writeGoalDir(workdir string, tc TicketContext) error {
+// The ticket's images are copied from artifactPath(id) to images/<n>.<ext>,
+// after removing whatever that directory held, so a removed image is gone.
+func writeGoalDir(workdir string, tc TicketContext, artifactPath func(id string) string) error {
 	root, err := os.OpenRoot(workdir)
 	if err != nil {
 		return fmt.Errorf("open checkout: %w", err)
@@ -75,6 +77,17 @@ func writeGoalDir(workdir string, tc TicketContext) error {
 			return err
 		}
 	}
+	if err := ensureDir(root, dir); err != nil {
+		return fmt.Errorf("create goal dir: %w", err)
+	}
+	if err := root.RemoveAll(filepath.Join(dir, "images")); err != nil {
+		return fmt.Errorf("clear images: %w", err)
+	}
+	for _, im := range tc.Images {
+		if err := copyImage(root, filepath.Join(dir, imageFile(im)), artifactPath(im.ArtifactID)); err != nil {
+			return fmt.Errorf("image %d: %w", im.N, err)
+		}
+	}
 	if len(tc.Prototypes) > 0 {
 		raw, err := json.MarshalIndent(tc.Prototypes, "", "  ")
 		if err != nil {
@@ -85,6 +98,24 @@ func writeGoalDir(workdir string, tc TicketContext) error {
 		}
 	}
 	return nil
+}
+
+// imageFile is an image's path in the goal directory.
+func imageFile(im domain.TicketImage) string {
+	ext := imageExt[im.MIME]
+	if ext == "" {
+		ext = "img"
+	}
+	return fmt.Sprintf("images/%d.%s", im.N, ext)
+}
+
+func copyImage(root *os.Root, rel, src string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return copyNew(root, rel, f)
 }
 
 // skillsDirFor is where the agent finds its skills.
@@ -109,7 +140,7 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 	}
 	job := t.Kind == domain.KindJob
 	if !job {
-		if err := writeGoalDir(ar.workdir, tc); err != nil {
+		if err := writeGoalDir(ar.workdir, tc, o.ArtifactPath); err != nil {
 			return "", "", fmt.Errorf("write goal dir: %w", err)
 		}
 	}
@@ -157,6 +188,20 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 		line("## Idea")
 		line("")
 		line("%s", t.Idea)
+	}
+	if !job && len(tc.Images) > 0 {
+		line("")
+		line("## Images")
+		line("")
+		if o.SeesImages(ar.run.Agent, ar.run.Model) {
+			line("The ticket has %d image(s), numbered in the order the user added them; the idea and the answers may refer to them by number. Open every one with your file-reading tool before you start, and hand the paths to any subagent that needs them.", len(tc.Images))
+		} else {
+			line("The ticket has %d image(s), numbered in the order the user added them; the idea and the answers may refer to them by number. This run's model cannot look at images, so do not try to open them: work from the text, and say in your summary that you could not see them.", len(tc.Images))
+		}
+		line("")
+		for _, im := range tc.Images {
+			line("- image %d: .ship/%s/%s", im.N, goal, imageFile(im))
+		}
 	}
 	if !job {
 		var rounds []domain.Round

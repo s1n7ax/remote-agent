@@ -81,7 +81,10 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) error {
 	return ok(w, map[string]any{
 		"version": s.Version, "projects": projects, "accounts": accounts, "settings": settings,
 		"models": m, "efforts": efforts, "vapidPublicKey": vapid, "preview": s.Orch.Preview(),
-		"activeRuns": s.Orch.ActiveRuns(), "draining": s.Orch.Draining(),
+		// Agents listed here see images only with the listed models; every
+		// model of an agent not listed sees them.
+		"imageModels": map[domain.AgentKind][]string{domain.AgentPi: s.Orch.PiImageModels()},
+		"activeRuns":  s.Orch.ActiveRuns(), "draining": s.Orch.Draining(),
 		"statuses": domain.Statuses, "notifyEvents": domain.NotifyEvents,
 	})
 }
@@ -272,7 +275,11 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	out := map[string]any{"ticket": t, "rounds": rounds, "runs": runs, "prototypes": protos}
+	images, err := s.Store.TicketImages(ctx, id)
+	if err != nil {
+		return err
+	}
+	out := map[string]any{"ticket": t, "rounds": rounds, "runs": runs, "prototypes": protos, "images": images}
 	if proof, found, err := s.Store.LatestProof(ctx, id); err != nil {
 		return err
 	} else if found {
