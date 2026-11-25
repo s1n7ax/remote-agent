@@ -21,10 +21,8 @@ let
   root = ../.;
   has = p: builtins.pathExists (root + "/${p}");
 
-  # Go modules hash. `null` while go.mod has no requirements; once go.sum
-  # exists this yields fakeHash, so the build prints the `got:` hash: replace
-  # this whole expression with it.
-  vendorHash = if has "go.sum" then lib.fakeHash else null;
+  # Go modules hash of go.mod/go.sum.
+  vendorHash = "sha256-IRyIjIhNkSseSaiX9MaCPCvdQKd+uQ+WnT2bgeOvqxU=";
 
   # npm dependencies hash of web/package-lock.json.
   npmDepsHash = lib.fakeHash;
@@ -70,6 +68,8 @@ buildGoModule {
         (root + "/internal")
         (root + "/skills")
         (root + "/VERSION")
+        # Keeps `go:embed all:dist` valid when there is no frontend to build.
+        (root + "/web/dist/.gitkeep")
       ]
       # Go sources of the web package (embed.go); node_modules/dist excluded.
       ++ lib.optional (has "web") (lib.fileset.fileFilter (f: f.hasExt "go") (root + "/web"))

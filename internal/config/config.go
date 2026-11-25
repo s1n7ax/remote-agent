@@ -39,8 +39,10 @@ type Config struct {
 	Sandbox bool `json:"sandbox"`
 	// SandboxPaths are bound read-only into every sandbox.
 	SandboxPaths []string `json:"sandboxPaths"`
-	// SandboxPATH is $PATH inside the sandbox.
+	// SandboxPATH is $PATH inside the sandbox; defaults to SandboxEnv/bin.
 	SandboxPATH string `json:"sandboxPath"`
+	// SandboxEnv is a store path whose bin/ holds the sandbox's tools.
+	SandboxEnv string `json:"sandboxEnv"`
 
 	MCPServers map[string]MCPServer `json:"mcpServers"`
 	// BrowserMCPServers name the MCP servers that start a browser; runs
@@ -85,6 +87,9 @@ func (c *Config) defaults() {
 	def(&c.ClaudeBin, "claude")
 	def(&c.PiBin, "pi")
 	def(&c.BwrapBin, "bwrap")
+	if c.SandboxEnv != "" {
+		def(&c.SandboxPATH, c.SandboxEnv+"/bin")
+	}
 	def(&c.SandboxPATH, "/run/current-system/sw/bin")
 	if c.MaxParallelRuns <= 0 {
 		c.MaxParallelRuns = 2
