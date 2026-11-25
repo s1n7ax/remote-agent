@@ -77,40 +77,9 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		return false, fmt.Errorf("no runner for agent %q", kind)
 	}
 
-	env := map[string]string{}
-	var account domain.Account
-	if kind == domain.AgentClaude {
-		acc, wait, err := o.pickAccount(ctx)
-		if err != nil {
-			return false, err
-		}
-		if acc == nil {
-			_, err := o.mutate(ctx, t.ID, func(c *domain.Ticket) {
-				c.Status = domain.StatusWaiting
-				c.WaitUntil = &wait
-				c.StatusNote = "all Claude accounts are at their usage limit"
-			})
-			return false, err
-		}
-		account = *acc
-		tok, err := o.st.AccountToken(ctx, account.ID)
-		if err != nil {
-			return false, err
-		}
-		env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
-	}
-	if kind == domain.AgentPi {
-		key, err := config.ReadSecret(o.cfg.OpenRouterKeyFile)
-		if err != nil {
-			return false, err
-		}
-		if key == "" {
-			return false, errors.New("no OpenRouter key configured")
-		}
-		if reason := o.overCap(ctx, t); reason != "" {
-			return false, o.askSpendCap(ctx, t, reason)
-		}
-		env["OPENROUTER_API_KEY"] = key
+	env, account, ready, err := o.agentCredentials(ctx, t, kind)
+	if err != nil || !ready {
+		return false, err
 	}
 
 	browser := usesBrowser(t)
@@ -213,6 +182,47 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		o.watch(context.WithoutCancel(ctx), ar)
 	}()
 	return true, nil
+}
+
+// agentCredentials picks the account and secrets a run of kind needs. Not
+// ready (with no error) means the ticket now waits: every Claude account is
+// at its limit, or the spend cap asks the user first.
+func (o *Orchestrator) agentCredentials(ctx context.Context, t domain.Ticket, kind domain.AgentKind) (env map[string]string, account domain.Account, ready bool, err error) {
+	env = map[string]string{}
+	switch kind {
+	case domain.AgentClaude:
+		acc, wait, err := o.pickAccount(ctx)
+		if err != nil {
+			return nil, account, false, err
+		}
+		if acc == nil {
+			_, err := o.mutate(ctx, t.ID, func(c *domain.Ticket) {
+				c.Status = domain.StatusWaiting
+				c.WaitUntil = &wait
+				c.StatusNote = "all Claude accounts are at their usage limit"
+			})
+			return nil, account, false, err
+		}
+		account = *acc
+		tok, err := o.st.AccountToken(ctx, account.ID)
+		if err != nil {
+			return nil, account, false, err
+		}
+		env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
+	case domain.AgentPi:
+		key, err := config.ReadSecret(o.cfg.OpenRouterKeyFile)
+		if err != nil {
+			return nil, account, false, err
+		}
+		if key == "" {
+			return nil, account, false, errors.New("no OpenRouter key configured")
+		}
+		if reason := o.overCap(ctx, t); reason != "" {
+			return nil, account, false, o.askSpendCap(ctx, t, reason)
+		}
+		env["OPENROUTER_API_KEY"] = key
+	}
+	return env, account, true, nil
 }
 
 // revokeTools ends the run's MCP access.

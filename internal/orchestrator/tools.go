@@ -484,9 +484,7 @@ func (o *Orchestrator) ToolOpenPR(ctx context.Context, runID int64, title, body 
 	if err != nil {
 		return PullState{}, err
 	}
-	if t.Issue != 0 && !strings.Contains(body, fmt.Sprintf("#%d", t.Issue)) {
-		body += fmt.Sprintf("\n\nCloses #%d", t.Issue)
-	}
+	body = closesIssue(body, t.Issue)
 	if t.PR != 0 {
 		if err := o.gh.UpdatePullBody(ctx, ar.project.Repo, t.PR, body); err != nil {
 			return PullState{}, err
@@ -511,6 +509,14 @@ func (o *Orchestrator) ToolOpenPR(ctx context.Context, runID int64, title, body 
 	return o.gh.Pull(ctx, ar.project.Repo, t.PR)
 }
 
+// closesIssue makes a PR body close issue unless it mentions it already.
+func closesIssue(body string, issue int) string {
+	if issue != 0 && !strings.Contains(body, fmt.Sprintf("#%d", issue)) {
+		body += fmt.Sprintf("\n\nCloses #%d", issue)
+	}
+	return body
+}
+
 // ToolUpdatePR replaces the PR description.
 func (o *Orchestrator) ToolUpdatePR(ctx context.Context, runID int64, body string) error {
 	ar, err := o.runByID(runID)
@@ -524,9 +530,7 @@ func (o *Orchestrator) ToolUpdatePR(ctx context.Context, runID int64, body strin
 	if t.PR == 0 {
 		return invalid("this ticket has no PR yet; use open_pr")
 	}
-	if t.Issue != 0 && !strings.Contains(body, fmt.Sprintf("#%d", t.Issue)) {
-		body += fmt.Sprintf("\n\nCloses #%d", t.Issue)
-	}
+	body = closesIssue(body, t.Issue)
 	return o.gh.UpdatePullBody(ctx, ar.project.Repo, t.PR, body)
 }
 
@@ -536,6 +540,10 @@ func (o *Orchestrator) ToolCIStatus(ctx context.Context, runID int64, number int
 	if err != nil {
 		return PullState{}, err
 	}
+	return o.ciStatus(ctx, ar, number)
+}
+
+func (o *Orchestrator) ciStatus(ctx context.Context, ar *activeRun, number int) (PullState, error) {
 	if number == 0 {
 		number = ar.ticket.PR
 	}
@@ -547,11 +555,11 @@ func (o *Orchestrator) ToolCIStatus(ctx context.Context, runID int64, number int
 
 // ToolCILogs returns the log tail of a failed check on the ticket's PR (or PR n).
 func (o *Orchestrator) ToolCILogs(ctx context.Context, runID int64, check string, number int) (string, error) {
-	pr, err := o.ToolCIStatus(ctx, runID, number)
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return "", err
 	}
-	ar, err := o.runByID(runID)
+	pr, err := o.ciStatus(ctx, ar, number)
 	if err != nil {
 		return "", err
 	}
