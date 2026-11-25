@@ -15,6 +15,7 @@ The orchestrator prepares the run's world before it sends the first message:
    | `.ship/<goal>/decisions/decisions.md`    | latest `submit_decisions` markdown                                               | design       |
    | `.ship/<goal>/rounds/<n>.json`           | `{ "tree": <submitted tree>, "answers": { "<qid>": {optionIds, text} } }`, visible questions only | after round n is answered |
    | `.ship/<goal>/prototypes.json`           | the latest `submit_prototypes` list, plus `"picked": "<name>"` once answered     | design (prototypes) |
+   | `.ship/<goal>/images/<n>.<ext>`          | the ticket's images as they are when the run starts (`jpg` `png` `gif` `webp`); the directory is emptied first, so a removed image is gone | when the ticket has images |
 
    Everything else under `.ship/<goal>/` (`code-review/`, `verification/`, `verify/`, `prototypes/<name>/` worktrees) is written by runs and must survive between runs.
 3. **Skills.** The skills repo HEAD is mounted read-only at `~/.claude/skills` (Claude) and `~/.agents/skills` (pi); `skills/agents/*.md` become the run's subagents (`~/.claude/agents` with `tools:` mapped through `skills/agents/claude-tool-names.json`; `~/.pi/agent/agents` as is).
@@ -50,6 +51,14 @@ You cannot reach the user except through the app's MCP tools. End the run with s
 
 <idea>]
 
+[## Images
+
+The ticket has <count> image(s), numbered in the order the user added them; the idea and the answers may refer to them by number. Open every one with your file-reading tool before you start, and hand the paths to any subagent that needs them.
+                                            [or, when the run's model cannot look at images: … This run's model cannot look at images, so do not try to open them: work from the text, and say in your summary that you could not see them.]
+
+- image <n>: .ship/<goal>/images/<n>.<ext>
+- …]
+
 [## Answers
 
 Round <n> (<purpose>) — full tree and answers: .ship/<goal>/rounds/<n>.json
@@ -83,6 +92,8 @@ Round <n> (<purpose>) — full tree and answers: .ship/<goal>/rounds/<n>.json
 | `job`     | —    | —                                                 | —       | yes | `goal`, `goal branch`, `issue`, `pull request`, `next round`, `prototypes`, `critical` are omitted |
 
 Answers list visible questions only, in tree order; a hidden question's answer is never sent.
+
+`## Images` is sent to every stage of a ticket that has images, never to a job. Numbers are never reused: after image 2 of 3 is removed the list is 1 and 3. An image added while a run is working reaches the next run only.
 
 ### Variables
 
