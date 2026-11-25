@@ -18,9 +18,10 @@
   let busy = $state(false);
   // Links to add with the ticket; ids are local only.
   let links = $state<TicketLink[]>([]);
+  let nextLinkId = 1;
 
   function addLink(t: Ticket, kind: LinkKind) {
-    links.push({ id: links.length + 1, kind, ticketId: t.id, title: t.title, issue: t.issue, status: t.status });
+    links.push({ id: nextLinkId++, kind, ticketId: t.id, title: t.title, issue: t.issue, status: t.status });
   }
 
   function removeLink(l: TicketLink) {

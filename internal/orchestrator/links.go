@@ -76,6 +76,23 @@ func (o *Orchestrator) addLink(ctx context.Context, id int64, in NewLink) error 
 	return err
 }
 
+// addNewLinks stores the links a new ticket t was created with. Nothing
+// depends on a new ticket yet, so none can close a loop; the targets are
+// checked again under linkMu, as one may have been deleted meanwhile.
+func (o *Orchestrator) addNewLinks(ctx context.Context, t domain.Ticket, links []NewLink) error {
+	o.linkMu.Lock()
+	defer o.linkMu.Unlock()
+	for _, l := range links {
+		if _, err := o.linkTarget(ctx, t, l); err != nil {
+			return err
+		}
+		if _, err := o.st.AddLink(ctx, t.ID, l.To, l.Kind, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // linkTarget loads and checks the other ticket of a new link from t.
 func (o *Orchestrator) linkTarget(ctx context.Context, t domain.Ticket, in NewLink) (domain.Ticket, error) {
 	switch in.Kind {

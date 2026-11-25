@@ -270,3 +270,21 @@ func TestLateDependencyBringsBranchUpToDate(t *testing.T) {
 	}
 	stop()
 }
+
+func TestHeldNoteWhileSlotsBusy(t *testing.T) {
+	h := newHarness(t) // two run slots
+	a := h.create("Dependency", NewTicket{})
+	busy := []*testRun{}
+	for range h.cfg.MaxParallelRuns {
+		h.create("Busy", NewTicket{Start: true})
+		busy = append(busy, h.nextRun())
+	}
+	b := h.create("Dependent", NewTicket{DependsOn: []int64{a.ID}, Start: true})
+	h.waitTicket(b.ID, "held", func(t domain.Ticket) bool { return strings.HasPrefix(t.StatusNote, "waiting on #1") })
+	for _, r := range busy {
+		if err := h.o.Stop(h.ctx, r.Info.TicketID); err != nil {
+			t.Fatal(err)
+		}
+		h.waitInactive(r.Info.TicketID)
+	}
+}

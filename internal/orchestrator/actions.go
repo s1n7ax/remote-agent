@@ -93,11 +93,8 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if err != nil {
 		return t, err
 	}
-	for _, l := range links {
-		// Nothing depends on a new ticket yet, so no link can close a loop.
-		if _, err := o.st.AddLink(ctx, t.ID, l.To, l.Kind, false); err != nil {
-			return t, err
-		}
+	if err := o.addNewLinks(ctx, t, links); err != nil {
+		return t, err
 	}
 	body := t.Idea + fmt.Sprintf("\n\n---\n_Tracked by remote-agent (ticket %d)._", t.ID)
 	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, body); err != nil {
@@ -442,7 +439,11 @@ func (o *Orchestrator) DeleteTicket(ctx context.Context, id int64) error {
 		return err
 	}
 	o.removeWorkspace(ctx, t)
-	if err := o.st.DeleteTicket(ctx, id); err != nil {
+	// Under linkMu, so no link to the ticket is added while it goes.
+	o.linkMu.Lock()
+	err = o.st.DeleteTicket(ctx, id)
+	o.linkMu.Unlock()
+	if err != nil {
 		return err
 	}
 	o.bus.Publish(Message{Type: "board", ProjectID: t.ProjectID})

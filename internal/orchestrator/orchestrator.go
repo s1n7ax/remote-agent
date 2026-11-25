@@ -254,17 +254,16 @@ func (o *Orchestrator) startReady(ctx context.Context) error {
 	draining := o.draining
 	free := o.cfg.MaxParallelRuns - len(o.active)
 	o.mu.Unlock()
-	if draining || free <= 0 {
+	if draining {
 		return nil
 	}
 	ready, err := o.st.TicketsByStatus(ctx, domain.StatusReady)
 	if err != nil {
 		return err
 	}
+	// Every ready ticket's hold is checked, slot or not, so a held card
+	// says what it waits on even while all slots are busy.
 	for _, t := range ready {
-		if free == 0 {
-			break
-		}
 		if o.isActive(t.ID) {
 			continue
 		}
@@ -272,6 +271,9 @@ func (o *Orchestrator) startReady(ctx context.Context) error {
 			if err != nil {
 				o.log.Error("check dependencies", "ticket", t.ID, "err", err)
 			}
+			continue
+		}
+		if free <= 0 {
 			continue
 		}
 		started, err := o.startRun(ctx, t)
