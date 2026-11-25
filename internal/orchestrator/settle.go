@@ -179,14 +179,15 @@ func toFix(t *domain.Ticket, why string, notify notifyFunc) {
 
 // verifyResult is GitHub's view of a PR at the end of a passing verify run.
 type verifyResult struct {
-	checked  bool
-	pr       PullState
-	err      error
-	checkout string // the checkout's HEAD, read when the PR head moved
+	checked bool
+	pr      PullState
+	err     error
 }
 
 // checkVerified reads the PR after a passing verify run and, when its head
-// is still the commit the run tested, takes it out of draft.
+// is still the commit the run tested, takes it out of draft. It compares
+// GitHub's head with the head the run started on; it reads nothing from the
+// agent's clone.
 func (o *Orchestrator) checkVerified(ctx context.Context, ar *activeRun) verifyResult {
 	v := verifyResult{checked: true}
 	t, err := o.st.Ticket(ctx, ar.ticket.ID)
@@ -198,7 +199,6 @@ func (o *Orchestrator) checkVerified(ctx context.Context, ar *activeRun) verifyR
 		return v
 	}
 	if ar.startSHA == "" || v.pr.HeadSHA != ar.startSHA {
-		v.checkout, _ = headCommit(ctx, ar.workdir)
 		return v
 	}
 	if v.pr.Draft {
@@ -209,9 +209,9 @@ func (o *Orchestrator) checkVerified(ctx context.Context, ar *activeRun) verifyR
 
 // markReady records the commit a passing verify run tested as verified; the
 // final CI wait then moves the ticket to in_review. When the PR head moved
-// during the run, the new head is verified again, from the checkout when it
-// holds that head.
-func markReady(t *domain.Ticket, tested string, v verifyResult, notify notifyFunc) {
+// during the run, the ticket goes back to verify: the next run checks the
+// new head out before it starts.
+func markReady(t *domain.Ticket, tested string, v verifyResult, _ notifyFunc) {
 	t.VerifiedSHA = ""
 	switch {
 	case !v.checked:
@@ -224,17 +224,10 @@ func markReady(t *domain.Ticket, tested string, v verifyResult, notify notifyFun
 		t.Stage, t.Status = domain.StageCI, domain.StatusWaiting
 		t.StatusNote = "verified; waiting for the final CI run"
 		t.VerifiedSHA = tested
-	case v.checkout != "" && v.checkout == v.pr.HeadSHA:
+	default:
 		t.Stage, t.Status = domain.StageVerify, domain.StatusReady
 		t.StatusNote = fmt.Sprintf("the PR head moved during verification (tested %s, head is %s); verifying again",
 			shortSHA(tested), shortSHA(v.pr.HeadSHA))
-	default:
-		// Re-verifying from a checkout that lacks the head would test the
-		// old commit again, forever.
-		t.Status = domain.StatusFailed
-		t.StatusNote = fmt.Sprintf("verified %s, but the PR head is %s, which the ticket's checkout (at %s) does not hold",
-			shortSHA(tested), shortSHA(v.pr.HeadSHA), shortSHA(v.checkout))
-		notify(domain.NotifyRunFailed, *t, t.StatusNote)
 	}
 }
 

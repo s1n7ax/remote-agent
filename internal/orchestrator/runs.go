@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"github.com/s1n7ax/remote-agent/internal/agent"
 	"github.com/s1n7ax/remote-agent/internal/config"
 	"github.com/s1n7ax/remote-agent/internal/domain"
+	"github.com/s1n7ax/remote-agent/internal/sandbox"
 )
 
 // activeRun is the orchestrator's view of one running agent.
@@ -29,8 +29,9 @@ type activeRun struct {
 	token   string
 	workdir string
 	browser bool
-	// startSHA is the checkout's HEAD when a verify run started: the
-	// commit it tests, and the only one a PASS may mark verified.
+	// startSHA is the PR head (as GitHub reported it) that a verify run's
+	// checkout was put at before the run started: the commit it tests, and
+	// the only one a PASS may mark verified.
 	startSHA string
 
 	// Set by MCP tool calls during the run.
@@ -84,10 +85,12 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 			return false, err
 		}
 		if acc == nil {
-			t.Status = domain.StatusWaiting
-			t.WaitUntil = &wait
-			t.StatusNote = "all Claude accounts are at their usage limit"
-			return false, o.save(ctx, &t)
+			_, err := o.mutate(ctx, t.ID, func(c *domain.Ticket) {
+				c.Status = domain.StatusWaiting
+				c.WaitUntil = &wait
+				c.StatusNote = "all Claude accounts are at their usage limit"
+			})
+			return false, err
 		}
 		account = *acc
 		tok, err := o.st.AccountToken(ctx, account.ID)
@@ -130,10 +133,18 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		return false, err
 	}
 	var startSHA string
-	if t.Stage == domain.StageVerify {
-		if startSHA, err = headCommit(ctx, workdir); err != nil {
+	if (t.Stage == domain.StageVerify || t.Stage == domain.StageFix) && t.PR != 0 {
+		verify := t.Stage == domain.StageVerify
+		head, atHead, err := o.checkoutPRHead(ctx, p, t, workdir, verify)
+		if err == nil && verify && !atHead {
+			err = fmt.Errorf("the ticket's checkout is not at the PR head %s", shortSHA(head))
+		}
+		if err != nil {
 			releaseBrowser()
 			return false, err
+		}
+		if verify {
+			startSHA = head
 		}
 	}
 
@@ -507,10 +518,9 @@ func (o *Orchestrator) SendMessage(ctx context.Context, ticketID int64, text str
 	return ar.sess.Send(ctx, text)
 }
 
-// Pause freezes a ticket's run (SIGSTOP on its process group): no tokens are
-// spent while paused. The sandbox keeps the agent in that group (no bwrap
-// --new-session); a process the agent moves into a new session or group
-// itself escapes the signal.
+// Pause freezes a ticket's run: no tokens are spent while paused. SIGSTOP
+// goes to the run's process group and, since an agent can leave that group
+// (setsid), to every process in its sandbox's PID namespace and below it.
 func (o *Orchestrator) Pause(ctx context.Context, ticketID int64) error {
 	return o.signal(ctx, ticketID, syscall.SIGSTOP, true)
 }
@@ -529,11 +539,10 @@ func (o *Orchestrator) signal(ctx context.Context, ticketID int64, sig syscall.S
 	if pid <= 0 {
 		return ErrNotActive
 	}
-	// Runners start agents in their own process group.
-	if err := syscall.Kill(-pid, sig); err != nil {
-		if err := syscall.Kill(pid, sig); err != nil {
-			return fmt.Errorf("signal run: %w", err)
-		}
+	// Runners start agents in their own process group; sandbox.Signal also
+	// reaches processes that left it.
+	if _, err := sandbox.Signal(pid, sig); err != nil {
+		return fmt.Errorf("signal run: %w", err)
 	}
 	ar.mu.Lock()
 	ar.paused = pause
@@ -564,15 +573,6 @@ func (o *Orchestrator) Stop(ctx context.Context, ticketID int64) error {
 	}
 	o.event(ctx, ar, domain.EventSystem, "stop requested")
 	return ar.sess.Stop()
-}
-
-// headCommit returns the commit checked out in dir.
-func headCommit(ctx context.Context, dir string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--verify", "HEAD").Output()
-	if err != nil {
-		return "", fmt.Errorf("read the checkout's HEAD: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func (o *Orchestrator) activeFor(ticketID int64) *activeRun {

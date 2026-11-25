@@ -30,22 +30,21 @@ func goalName(t domain.Ticket) string {
 }
 
 // writeGoalDir refreshes .ship/<goal>/ in the checkout from the database.
+// The checkout is agent-writable, so every write goes through an os.Root at
+// it and replaces what was there: a planted symlink is removed, not
+// followed.
 func writeGoalDir(workdir string, tc TicketContext) error {
-	goal := goalName(tc.Ticket)
-	root := filepath.Join(workdir, ".ship")
-	dir := filepath.Join(root, goal)
+	root, err := os.OpenRoot(workdir)
+	if err != nil {
+		return fmt.Errorf("open checkout: %w", err)
+	}
+	defer root.Close()
+	dir := filepath.Join(".ship", goalName(tc.Ticket))
 	write := func(rel, content string) error {
-		p := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(p, []byte(content), 0o644)
+		return writeNew(root, filepath.Join(dir, rel), []byte(content))
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := writeNew(root, filepath.Join(".ship", ".gitignore"), []byte("*\n")); err != nil {
 		return fmt.Errorf("create goal dir: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*\n"), 0o644); err != nil {
-		return err
 	}
 	if tc.Ticket.Requirement != "" {
 		if err := write("requirement/requirement.md", tc.Ticket.Requirement); err != nil {
