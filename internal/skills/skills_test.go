@@ -73,9 +73,22 @@ func TestEditCommitSnapshotDelete(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("after delete %+v", list)
 	}
+	removed, _ := m.git(ctx, "rev-parse", "HEAD")
+	if _, err := m.Restore(ctx, "questions", removed); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = m.List(ctx); len(list) != 2 {
+		t.Fatalf("after restore %+v", list)
+	}
+	if _, err := m.Restore(ctx, "questions", "HEAD; rm -rf /"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad commit accepted: %v", err)
+	}
+	if _, err := m.Delete(ctx, "questions", ""); err != nil {
+		t.Fatal(err)
+	}
 	log, _ := m.git(ctx, "log", "--oneline")
-	if n := len(strings.Split(log, "\n")); n != 3 {
-		t.Fatalf("want 3 commits, got %d:\n%s", n, log)
+	if n := len(strings.Split(log, "\n")); n != 5 {
+		t.Fatalf("want 5 commits, got %d:\n%s", n, log)
 	}
 }
 

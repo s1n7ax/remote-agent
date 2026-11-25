@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/skills/{name}/files/{file...}", s.readSkillFile)
 	h("PUT /api/skills/{name}/files/{file...}", s.writeSkillFile)
 	h("DELETE /api/skills/{name}", s.deleteSkill)
+	h("POST /api/skills/{name}/restore", s.restoreSkill)
 	h("GET /api/skills/benchmark", s.benchResults)
 	h("POST /api/skills/benchmark", s.startBench)
 

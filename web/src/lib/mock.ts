@@ -818,9 +818,19 @@ on('POST', '/api/skills/benchmark', () => {
   }, 6000);
   return { started };
 });
+const removedSkills: Record<string, Record<string, string>> = {};
 on('DELETE', '/api/skills/([^/]+)', (m) => {
-  delete skillFiles[decodeURIComponent(m[1])];
+  const name = decodeURIComponent(m[1]);
+  removedSkills[name] = skillFiles[name];
+  delete skillFiles[name];
   return { commit: 'f00dfeed' };
+});
+on('POST', '/api/skills/([^/]+)/restore', (m) => {
+  const name = decodeURIComponent(m[1]);
+  if (!removedSkills[name]) throw new ApiError(400, 'invalid: nothing to restore');
+  skillFiles[name] = removedSkills[name];
+  delete removedSkills[name];
+  return { commit: 'feedf00d' };
 });
 
 on('GET', '/api/notifications', () => ({ prefs: notify, vapidPublicKey: MOCK_VAPID }));

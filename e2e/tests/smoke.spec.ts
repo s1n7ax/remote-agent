@@ -89,3 +89,18 @@ test('a ticket goes from idea to merged', async ({ page, request }) => {
   await expect.poll(async () => (await github(request)).merges?.length ?? 0).toBe(1);
   await expect.poll(async () => (await ticket(request, id)).status).toBe('done');
 });
+
+test('one tap removes a skill and Undo brings it back', async ({ page, request }) => {
+  await page.goto(`/#/login?token=${token}`);
+  await page.goto('/#/skills');
+  const remove = page.getByRole('button', { name: 'Remove todo-comments' });
+  await expect(remove).toBeVisible();
+  await remove.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Removed todo-comments' })).toBeVisible();
+  await expect(remove).toHaveCount(0);
+  const names = async () => ((await (await request.get('/api/skills', { headers })).json()) as { name: string }[]).map((s) => s.name);
+  expect(await names()).not.toContain('todo-comments');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(remove).toBeVisible();
+  expect(await names()).toContain('todo-comments');
+});

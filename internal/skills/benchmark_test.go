@@ -26,7 +26,8 @@ func TestBenchRunsInSandbox(t *testing.T) {
 				t.Errorf("eval HOME is not its work dir: %v", env)
 			}
 			// Stand-in for bwrap: write the result where the eval would.
-			return []string{"cp", fixture, argv[len(argv)-1]}, env
+			out := argv[slices.Index(argv, "--json")+1]
+			return []string{"cp", fixture, out}, env
 		}
 	}
 	r := b.run(context.Background(), snap, "questions", []string{"PATH=" + os.Getenv("PATH")})
@@ -35,6 +36,9 @@ func TestBenchRunsInSandbox(t *testing.T) {
 	}
 	if len(workdirs) != 1 || len(inner) == 0 || inner[0] != "/nonexistent/claude" {
 		t.Fatalf("sandbox calls %v, argv %v", workdirs, inner)
+	}
+	if !slices.Contains(inner, "--trust-plugin") {
+		t.Fatalf("eval argv %v lacks --trust-plugin; a headless run would stop to ask", inner)
 	}
 	if inner[3] != filepath.Join(workdirs[0], "questions") {
 		t.Fatalf("eval suite %s is not in the sandbox work dir %s", inner[3], workdirs[0])

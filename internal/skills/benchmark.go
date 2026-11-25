@@ -167,7 +167,10 @@ func (b *Bench) run(ctx context.Context, snap, name string, env []string) Result
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
 	argv := []string{b.claudeBin, "plugin", "eval", filepath.Join(work, name),
-		"--ablation", "with-without", "--no-publish", "--threshold", "0", "--json", out}
+		"--ablation", "with-without", "--no-publish", "--threshold", "0", "--json", out,
+		// The suite is the user's own skill and the eval runs sandboxed; without
+		// this the CLI stops to ask and a headless run exits 1.
+		"--trust-plugin"}
 	env = append(append([]string{}, env...), "CLAUDE_CODE_WALNUT_SPIRE=1", "HOME="+work)
 	if b.Sandbox != nil {
 		argv, env = b.Sandbox(work)(argv, env)

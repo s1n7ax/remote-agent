@@ -822,6 +822,20 @@ func (s *Server) deleteSkill(w http.ResponseWriter, r *http.Request) error {
 	return ok(w, map[string]string{"commit": sha})
 }
 
+func (s *Server) restoreSkill(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		Commit string `json:"commit"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	sha, err := s.Skills.Restore(r.Context(), r.PathValue("name"), in.Commit)
+	if err != nil {
+		return err
+	}
+	return ok(w, map[string]string{"commit": sha})
+}
+
 func (s *Server) benchResults(w http.ResponseWriter, r *http.Request) error {
 	res, err := s.Bench.Results()
 	if err != nil {

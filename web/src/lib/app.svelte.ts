@@ -36,7 +36,7 @@ class App {
     this.needsLogin = false;
     await this.load();
   }
-  toast = $state<{ text: string; kind: 'ok' | 'error' } | null>(null);
+  toast = $state<{ text: string; kind: 'ok' | 'error'; action?: { label: string; run: () => void } } | null>(null);
   #toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   async load(): Promise<void> {
@@ -78,10 +78,10 @@ class App {
     return modelLabel(model);
   }
 
-  notify(text: string, kind: 'ok' | 'error' = 'ok'): void {
-    this.toast = { text, kind };
+  notify(text: string, kind: 'ok' | 'error' = 'ok', action?: { label: string; run: () => void }): void {
+    this.toast = { text, kind, action };
     clearTimeout(this.#toastTimer);
-    this.#toastTimer = setTimeout(() => (this.toast = null), kind === 'error' ? 6000 : 2600);
+    this.#toastTimer = setTimeout(() => (this.toast = null), action ? 8000 : kind === 'error' ? 6000 : 2600);
   }
 
   /** Runs an action, toasting its error. Returns undefined on failure. */

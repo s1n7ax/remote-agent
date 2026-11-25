@@ -165,6 +165,8 @@ export const api = {
   saveSkillFile: (name: string, path: string, content: string, message: string) =>
     call<{ commit: string }>('PUT', `/api/skills/${e(name)}/files/${encPath(path)}`, { content, message }),
   deleteSkill: (name: string) => call<{ commit: string }>('DELETE', `/api/skills/${e(name)}`),
+  restoreSkill: (name: string, commit: string) =>
+    call<{ commit: string }>('POST', `/api/skills/${e(name)}/restore`, { commit }),
   /** Starts a background benchmark; poll benchmarkResults. */
   benchmark: (skills: string[] = []) => call<{ started: string[] }>('POST', '/api/skills/benchmark', { skills }),
   benchmarkResults: () => call<BenchmarkResult[] | null>('GET', '/api/skills/benchmark'),

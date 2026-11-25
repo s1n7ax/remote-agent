@@ -135,7 +135,20 @@
 {#if app.state}<ProjectSwitcher bind:open={switching} current={fallback} />{/if}
 
 {#if app.toast}
-  <div class="toast {app.toast.kind}" role={app.toast.kind === 'error' ? 'alert' : 'status'}>{app.toast.text}</div>
+  <div class="toast {app.toast.kind}" role={app.toast.kind === 'error' ? 'alert' : 'status'}>
+    {app.toast.text}
+    {#if app.toast.action}
+      <button
+        class="toast-action"
+        type="button"
+        onclick={() => {
+          // Take the action before clearing the toast it belongs to.
+          const run = app.toast?.action?.run;
+          app.toast = null;
+          run?.();
+        }}>{app.toast.action.label}</button>
+    {/if}
+  </div>
 {/if}
 
 <style>
@@ -234,6 +247,17 @@
     color: var(--bg);
     font-size: 0.9rem;
     box-shadow: var(--shadow-sheet);
+  }
+  .toast-action {
+    margin-left: 12px;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+    pointer-events: auto;
   }
   .toast.error {
     background: var(--bad);

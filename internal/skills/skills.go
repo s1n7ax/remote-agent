@@ -231,6 +231,25 @@ func (m *Manager) Delete(ctx context.Context, name, message string) (string, err
 	return m.commit(ctx, message, name)
 }
 
+var commitID = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
+// Restore brings back a skill as it was before commit (the commit that
+// removed it) and commits that.
+func (m *Manager) Restore(ctx context.Context, name, commit string) (string, error) {
+	if _, err := m.path(name, "SKILL.md"); err != nil {
+		return "", err
+	}
+	if !commitID.MatchString(commit) {
+		return "", fmt.Errorf("%w: bad commit %q", ErrInvalid, commit)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.git(ctx, "checkout", commit+"^", "--", name); err != nil {
+		return "", fmt.Errorf("%w: cannot restore %s from %s: %v", ErrInvalid, name, commit, err)
+	}
+	return m.commit(ctx, fmt.Sprintf("chore(%s): restore skill", name), name)
+}
+
 func (m *Manager) commit(ctx context.Context, message, path string) (string, error) {
 	if _, err := m.git(ctx, "add", "-A", "--", path); err != nil {
 		return "", err

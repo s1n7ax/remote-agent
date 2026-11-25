@@ -203,6 +203,10 @@ func (o *Orchestrator) Answer(ctx context.Context, ticketID int64, n int, qid st
 		return res, err
 	}
 	o.postRoundSummary(ctx, res.Ticket, res.Round)
+	// The pick is made: a prototype preview of this ticket has done its job.
+	if pv := o.Preview(); pv != nil && pv.TicketID == res.Ticket.ID {
+		o.StopPreview()
+	}
 	o.Kick()
 	return res, nil
 }

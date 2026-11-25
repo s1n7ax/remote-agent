@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Icon from '../components/Icon.svelte';
-  import Sheet from '../components/Sheet.svelte';
   import { api } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { errorText } from '../lib/format';
@@ -21,8 +20,6 @@
   let message = $state('');
   let loadingFile = $state(false);
   let saving = $state(false);
-  let removing = $state<SkillSummary | null>(null);
-  let removeOpen = $state(false);
 
   const current = $derived(skills?.find((s) => s.name === skill));
   const path = $derived(file ?? (current?.files.includes('SKILL.md') ? 'SKILL.md' : current?.files[0]));
@@ -95,15 +92,19 @@
     }
   }
 
-  async function remove() {
-    if (!removing) return;
-    const name = removing.name;
-    const ok = await app.attempt(() => api.deleteSkill(name), `Removed ${name}`);
-    removeOpen = false;
-    if (ok) {
-      await load();
-      if (skill === name) router.go({ name: 'skills' });
-    }
+  // One tap removes (a commit in the skills repo); the toast offers Undo,
+  // which restores the skill from the commit before the removal.
+  async function remove(name: string) {
+    const res = await app.attempt(() => api.deleteSkill(name));
+    if (!res) return;
+    await load();
+    if (skill === name) router.go({ name: 'skills' });
+    app.notify(`Removed ${name}`, 'ok', {
+      label: 'Undo',
+      run: async () => {
+        if (await app.attempt(() => api.restoreSkill(name, res.commit), `Restored ${name}`)) await load();
+      },
+    });
   }
 
   const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -119,7 +120,7 @@
     <a class="back" href={href({ name: 'skills' })}><Icon name="back" size={18} /> Skills</a>
     <div class="row spread">
       <h1>{current.name}</h1>
-      <button class="btn small danger" type="button" onclick={() => ((removing = current), (removeOpen = true))}>Remove</button>
+      <button class="btn small danger" type="button" onclick={() => current && remove(current.name)}>Remove</button>
     </div>
     <nav class="files" aria-label="Files">
       {#each current.files as f (f)}
@@ -172,7 +173,7 @@
             <span class="muted small">{s.description}</span>
           </a>
           {#if s.hasEvals}<span class="badge">evals</span>{/if}
-          <button class="icon-btn" type="button" aria-label="Remove {s.name}" onclick={() => ((removing = s), (removeOpen = true))}><Icon name="trash" size={18} /></button>
+          <button class="icon-btn" type="button" aria-label="Remove {s.name}" onclick={() => remove(s.name)}><Icon name="trash" size={18} /></button>
         </li>
       {:else}
         <li class="muted">No skills in the repo.</li>
@@ -181,13 +182,6 @@
   {/if}
 </div>
 
-<Sheet bind:open={removeOpen} title="Remove {removing?.name ?? ''}?">
-  <p>This commits the deletion of the skill to the skills repo. Runs started after it no longer load it.</p>
-  {#snippet footer()}
-    <button class="btn grow" type="button" onclick={() => (removeOpen = false)}>Cancel</button>
-    <button class="btn danger solid grow" type="button" onclick={remove}>Remove skill</button>
-  {/snippet}
-</Sheet>
 
 <style>
   .back {
