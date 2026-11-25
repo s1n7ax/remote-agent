@@ -204,6 +204,16 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	return true, nil
 }
 
+// revokeTools ends the run's MCP access.
+func (o *Orchestrator) revokeTools(ar *activeRun) {
+	o.mu.Lock()
+	delete(o.byRun, ar.run.ID)
+	o.mu.Unlock()
+	if o.revoke != nil && ar.token != "" {
+		o.revoke(ar.token)
+	}
+}
+
 func (o *Orchestrator) unregister(ar *activeRun) {
 	o.mu.Lock()
 	delete(o.active, ar.ticket.ID)
@@ -215,11 +225,11 @@ func (o *Orchestrator) unregister(ar *activeRun) {
 }
 
 // buildSpec prepares config dirs, MCP config and the prompt. home/ is
-// agent-writable (and shared by the project's concurrent runs), so every
+// agent-writable, so every
 // file operation there goes through an os.Root at home/: a planted symlink
 // cannot make the app delete, write or read outside it.
 func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain.AgentKind, acc domain.Account, env map[string]string) (agent.Spec, error) {
-	home := o.homeDir(ar.project.ID)
+	home := o.homeDir(ar.ticket)
 	hroot, err := os.OpenRoot(home)
 	if err != nil {
 		return agent.Spec{}, fmt.Errorf("open home: %w", err)
@@ -446,8 +456,14 @@ func (o *Orchestrator) watch(ctx context.Context, ar *activeRun) {
 		// claude reports a run total at the end.
 		ar.run.CostUSD = final.Cost
 	}
-	o.unregister(ar)
+	// Tool calls end before settle decides; the ticket stays active (user
+	// actions get ErrBusy) until settle has saved, so a Start right after
+	// Stop is not overwritten.
+	o.revokeTools(ar)
 	o.settle(ctx, ar, final)
+	o.mu.Lock()
+	delete(o.active, ar.ticket.ID)
+	o.mu.Unlock()
 	if ar.ticket.Kind == domain.KindJob {
 		// Every job firing gets a fresh clone; drop it once the job ended.
 		if t, err := o.st.Ticket(ctx, ar.ticket.ID); err == nil && (t.Status == domain.StatusDone || t.Status == domain.StatusFailed) {

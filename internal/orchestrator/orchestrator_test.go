@@ -845,8 +845,8 @@ func TestUploadArtifactRejectsEscapes(t *testing.T) {
 		t.Fatalf("directory upload: err = %v", err)
 	}
 
-	writeFile(t, filepath.Join(h.o.homeDir(h.project.ID), "shots", "home.png"), "\x89PNG\r\n\x1a\n")
-	for _, p := range []string{"shot.png", "inside", filepath.Join(wd, "shot.png"), filepath.Join(h.o.homeDir(h.project.ID), "shots", "home.png")} {
+	writeFile(t, filepath.Join(h.o.homeDir(domain.Ticket{ID: r.Info.TicketID, ProjectID: h.project.ID}), "shots", "home.png"), "\x89PNG\r\n\x1a\n")
+	for _, p := range []string{"shot.png", "inside", filepath.Join(wd, "shot.png"), filepath.Join(h.o.homeDir(domain.Ticket{ID: r.Info.TicketID, ProjectID: h.project.ID}), "shots", "home.png")} {
 		id, err := h.o.ToolUploadArtifact(h.ctx, r.ID(), p)
 		if err != nil {
 			t.Fatalf("upload %s: %v", p, err)

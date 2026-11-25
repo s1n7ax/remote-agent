@@ -37,11 +37,29 @@ func (o *Orchestrator) pollCI(ctx context.Context) error {
 			o.log.Warn("poll PR", "ticket", t.ID, "pr", t.PR, "err", err)
 			continue
 		}
-		if changed := o.onPull(ctx, &t, pr); changed {
-			if err := o.save(ctx, &t); err != nil {
-				return err
-			}
+		if err := o.applyPull(ctx, t, pr); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// applyPull applies a polled PR to the ticket's current row. The poll took a
+// network round trip, so the row read before it may be stale: a user action
+// or a run may have changed the ticket meanwhile.
+func (o *Orchestrator) applyPull(ctx context.Context, polled domain.Ticket, pr PullState) error {
+	o.tmu.Lock()
+	defer o.tmu.Unlock()
+	t, err := o.st.Ticket(ctx, polled.ID)
+	if err != nil {
+		return err
+	}
+	waiting := t.Status == domain.StatusWaiting && t.Stage == domain.StageCI
+	if t.PR != polled.PR || (!waiting && t.Status != domain.StatusInReview) {
+		return nil // moved on while we polled
+	}
+	if o.onPull(ctx, &t, pr) {
+		return o.save(ctx, &t)
 	}
 	return nil
 }

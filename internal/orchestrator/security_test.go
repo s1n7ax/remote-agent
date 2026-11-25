@@ -159,13 +159,14 @@ func TestAgentGitConfigNeverRunsInApp(t *testing.T) {
 
 	// Sandboxes: runs write only their clone and home; git reading an
 	// agent clone sees nothing else of the project.
-	home := h.o.homeDir(h.project.ID)
 	repo := h.o.repoDir(h.project.ID)
 	var runs, uploads, refreshes int
 	for _, c := range rec.all() {
 		switch {
 		case len(c.rw) == 2:
 			runs++
+			// Each ticket has its own home, named like its clone.
+			home := filepath.Join(h.o.projectDir(h.project.ID), "home", filepath.Base(c.rw[0]))
 			if c.rw[1] != home || (c.rw[0] != wd && c.rw[0] != h.o.workDir(other)) || c.workdir != c.rw[0] {
 				t.Errorf("run sandbox rw = %v (workdir %s), want its clone and home", c.rw, c.workdir)
 			}
@@ -232,10 +233,10 @@ func TestHomeSymlinksDoNotEscape(t *testing.T) {
 	writeFile(t, filepath.Join(outside, "skills", "keep"), "precious")
 	writeFile(t, filepath.Join(outside, "agents", "keep"), "precious")
 	writeFile(t, filepath.Join(outside, "mcp-target"), "precious")
-	home := h.o.homeDir(h.project.ID)
+	home := h.o.homeDir(domain.Ticket{ID: 1, ProjectID: h.project.ID}) // the ticket created below
 	for link, target := range map[string]string{
 		".claude":                          outside, // .claude/skills would be outside/skills
-		".agents":                          "../../../../" + filepath.Base(outside),
+		".agents":                          "../../../../../" + filepath.Base(outside),
 		filepath.Join(".fake", "mcp.json"): filepath.Join(outside, "mcp-target"),
 		filepath.Join(".fake", "skills"):   filepath.Join(outside, "skills"),
 	} {

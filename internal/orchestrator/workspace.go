@@ -42,8 +42,10 @@ func (o *Orchestrator) workDir(t domain.Ticket) string {
 	return filepath.Join(o.projectDir(t.ProjectID), "work", fmt.Sprint(t.ID))
 }
 
-func (o *Orchestrator) homeDir(projectID int64) string {
-	return filepath.Join(o.projectDir(projectID), "home")
+// homeDir is a ticket's agent $HOME. Each ticket has its own, so runs
+// working in parallel cannot read each other's MCP token or config.
+func (o *Orchestrator) homeDir(t domain.Ticket) string {
+	return filepath.Join(o.projectDir(t.ProjectID), "home", fmt.Sprint(t.ID))
 }
 
 // remoteURL is the credential-free GitHub URL a ticket clone's origin names.
@@ -93,6 +95,15 @@ func (o *Orchestrator) prepareWorkspace(ctx context.Context, p domain.Project, t
 		if err := realDir(root, d); err != nil {
 			return "", err
 		}
+	}
+	homes, err := root.OpenRoot("home")
+	if err != nil {
+		return "", err
+	}
+	err = realDir(homes, fmt.Sprint(t.ID))
+	_ = homes.Close()
+	if err != nil {
+		return "", err
 	}
 	if err := o.syncRepo(ctx, p); err != nil {
 		return "", err
@@ -294,6 +305,12 @@ func (o *Orchestrator) removeWorkspace(_ context.Context, t domain.Ticket) {
 	// Root.RemoveAll unlinks symlinks rather than following them.
 	if err := root.RemoveAll(fmt.Sprint(t.ID)); err != nil {
 		o.log.Warn("remove ticket clone", "ticket", t.ID, "err", err)
+	}
+	if home, err := os.OpenRoot(filepath.Join(o.projectDir(t.ProjectID), "home")); err == nil {
+		if err := home.RemoveAll(fmt.Sprint(t.ID)); err != nil {
+			o.log.Warn("remove ticket home", "ticket", t.ID, "err", err)
+		}
+		_ = home.Close()
 	}
 }
 

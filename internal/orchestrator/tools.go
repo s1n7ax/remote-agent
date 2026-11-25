@@ -233,7 +233,7 @@ func (o *Orchestrator) storeArtifact(ctx context.Context, ar *activeRun, path st
 	}
 	path = filepath.Clean(path)
 	var base, rel string
-	for _, dir := range []string{ar.workdir, o.homeDir(ar.project.ID)} {
+	for _, dir := range []string{ar.workdir, o.homeDir(ar.ticket)} {
 		if r, err := filepath.Rel(dir, path); err == nil && r != ".." && !strings.HasPrefix(r, "../") {
 			base, rel = dir, r
 			break

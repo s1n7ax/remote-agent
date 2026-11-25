@@ -194,6 +194,9 @@ func TestMergeRefusesUnverifiedHead(t *testing.T) {
 	if m := h.gh.mergeCalls(); len(m) != 0 {
 		t.Fatalf("merged an unverified head: %v", m)
 	}
+	// The refused merge rechecks CI, which sends the ticket back to verify;
+	// wait for that so no poll of the old head lands after the steps below.
+	h.waitState(tk.ID, domain.StatusReady, domain.StageVerify)
 
 	// Never verified at all.
 	cur := h.ticket(tk.ID)
@@ -205,11 +208,14 @@ func TestMergeRefusesUnverifiedHead(t *testing.T) {
 		t.Fatalf("merge of an unverified ticket: err = %v, want ErrInvalid", err)
 	}
 
+	// Move the head first: while it differs, the CI poller rightly clears
+	// VerifiedSHA and sends the ticket back to verify.
+	h.gh.update(n, func(p *PullState) { p.HeadSHA = verified })
 	cur.VerifiedSHA = verified
+	cur.Stage, cur.Status = domain.StageCI, domain.StatusInReview
 	if err := h.st.UpdateTicket(h.ctx, &cur); err != nil {
 		t.Fatal(err)
 	}
-	h.gh.update(n, func(p *PullState) { p.HeadSHA = verified })
 	if err := h.o.Merge(h.ctx, h.project.ID, n, "squash"); err != nil {
 		t.Fatal(err)
 	}
