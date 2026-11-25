@@ -827,5 +827,5 @@ func TestUploadArtifactRejectsEscapes(t *testing.T) {
 			t.Fatalf("artifact record = %+v, %v", a, err)
 		}
 	}
-	r.Sess.Stop()
+	_ = r.Sess.Stop()
 }

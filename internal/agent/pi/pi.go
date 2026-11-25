@@ -83,7 +83,7 @@ func (r Runner) Start(ctx context.Context, spec agent.Spec) (agent.Session, erro
 		err = p.WriteJSON(map[string]string{"id": stateID, "type": "get_state"})
 	}
 	if err != nil {
-		s.Stop()
+		_ = s.Stop()
 		return nil, fmt.Errorf("pi: send prompt: %w", err)
 	}
 	return s, nil
@@ -145,7 +145,7 @@ func (s *session) finish(ctx context.Context, lim *proc.Limiter) {
 	select {
 	case <-s.proc.Done():
 	case <-ctx.Done():
-		s.Stop()
+		_ = s.Stop()
 		<-s.proc.Done()
 	}
 	proc.LogDropped(s.em, lim)

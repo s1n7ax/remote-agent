@@ -158,7 +158,7 @@ func TestSendInterruptStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitText(t, s, "after")
-	go s.Stop()
+	go func() { _ = s.Stop() }()
 	_, done := collect(t, s)
 	if !errors.Is(done.Err, agent.ErrStopped) {
 		t.Fatalf("err = %v", done.Err)

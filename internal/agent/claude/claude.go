@@ -90,7 +90,7 @@ func (r Runner) Start(ctx context.Context, spec agent.Spec) (agent.Session, erro
 	s.proc = p
 	go s.finish(ctx, lim)
 	if err := p.WriteJSON(userLine(spec.Prompt, "")); err != nil {
-		s.Stop()
+		_ = s.Stop()
 		return nil, fmt.Errorf("claude: send prompt: %w", err)
 	}
 	return s, nil
@@ -138,7 +138,7 @@ func (s *session) finish(ctx context.Context, lim *proc.Limiter) {
 	select {
 	case <-s.proc.Done():
 	case <-ctx.Done():
-		s.Stop()
+		_ = s.Stop()
 		<-s.proc.Done()
 	}
 	proc.LogDropped(s.em, lim)

@@ -63,11 +63,16 @@
           vm = import ./nix/tests/vm.nix { inherit self pkgs; };
 
           # go vet + go test with the same sources and modules as the package.
-          go = remote-agent.overrideAttrs (_: {
+          go = remote-agent.overrideAttrs (old: {
             pname = "remote-agent-go-check";
             doCheck = true;
+            # The skills and orchestrator tests drive real git repositories.
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.git ];
             checkPhase = ''
               runHook preCheck
+              export HOME=$TMPDIR
+              git config --global user.name check
+              git config --global user.email check@example.invalid
               go vet ./...
               go test ./...
               runHook postCheck

@@ -229,7 +229,7 @@ func TestStop(t *testing.T) {
 				t.Fatal("no pid")
 			}
 			began := time.Now()
-			go s.Stop()
+			go func() { _ = s.Stop() }()
 			_, done := collect(t, s)
 			if !errors.Is(done.Err, agent.ErrStopped) {
 				t.Fatalf("err = %v", done.Err)
