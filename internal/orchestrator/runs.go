@@ -34,6 +34,10 @@ type activeRun struct {
 	// the only one a PASS may mark verified.
 	startSHA string
 
+	// updated lists the dependency links whose merge the run's prompt asks
+	// it to bring in; cleared once the run started.
+	updated []int64
+
 	// Set by MCP tool calls during the run.
 	questions bool
 	prOpened  bool
@@ -157,6 +161,9 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		return false, fmt.Errorf("start %s: %w", kind, err)
 	}
 	ar.sess = sess
+	if err := o.st.ClearLinkUpdates(ctx, ar.updated); err != nil {
+		o.log.Error("clear link updates", "ticket", t.ID, "err", err)
+	}
 
 	startedAt := o.now()
 	ar.run.StartedAt = &startedAt

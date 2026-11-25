@@ -4,6 +4,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -99,6 +100,46 @@ type Ticket struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
+
+// LinkKind is how a linked ticket relates to the ticket it is seen from.
+type LinkKind string
+
+const (
+	// LinkDependsOn: this ticket runs no stage until the other is done.
+	LinkDependsOn LinkKind = "depends_on"
+	// LinkBlocks is a dependency seen from the ticket depended on.
+	LinkBlocks LinkKind = "blocks"
+	// LinkRelated is a two-way cross-reference that holds nothing back.
+	LinkRelated LinkKind = "related"
+)
+
+// TicketLink is one link as seen from one of its two tickets; the fields
+// describe the other ticket.
+type TicketLink struct {
+	ID         int64    `json:"id"`
+	Kind       LinkKind `json:"kind"`
+	TicketID   int64    `json:"ticketId"`
+	Title      string   `json:"title"`
+	Issue      int      `json:"issue,omitempty"`
+	Status     Status   `json:"status,omitempty"` // empty once deleted
+	StatusNote string   `json:"statusNote,omitempty"`
+	Deleted    bool     `json:"deleted,omitempty"`
+	// NeedsUpdate marks a dependency added after the dependent's branch was
+	// cut: the dependent's next run first merges the base branch.
+	NeedsUpdate bool `json:"-"`
+}
+
+// Ref names a linked ticket the way the user sees it: its issue number, or
+// its ticket id when it has no issue.
+func (l TicketLink) Ref() string {
+	if l.Issue != 0 {
+		return fmt.Sprintf("#%d", l.Issue)
+	}
+	return fmt.Sprintf("ticket %d", l.TicketID)
+}
+
+// Finished reports whether a dependency no longer holds its dependent back.
+func (l TicketLink) Finished() bool { return !l.Deleted && l.Status == StatusDone }
 
 // QuestionKind is how a question is answered.
 type QuestionKind string

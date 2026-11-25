@@ -90,6 +90,8 @@ type Orchestrator struct {
 	tmu sync.Mutex
 	// claimMu serialises job runs claiming a new branch.
 	claimMu sync.Mutex
+	// linkMu serialises adding links, so a loop check sees every link.
+	linkMu sync.Mutex
 
 	mu       sync.Mutex
 	active   map[int64]*activeRun // by ticket id
@@ -264,6 +266,12 @@ func (o *Orchestrator) startReady(ctx context.Context) error {
 			break
 		}
 		if o.isActive(t.ID) {
+			continue
+		}
+		if held, err := o.held(ctx, t); err != nil || held {
+			if err != nil {
+				o.log.Error("check dependencies", "ticket", t.ID, "err", err)
+			}
 			continue
 		}
 		started, err := o.startRun(ctx, t)

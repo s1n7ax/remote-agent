@@ -28,6 +28,22 @@ type NewTicket struct {
 	Prototypes bool             `json:"prototypes"`
 	Start      bool             `json:"start"`
 	StartAt    *time.Time       `json:"startAt"`
+	// DependsOn and Related are tickets of the same project to link the
+	// new ticket to.
+	DependsOn []int64 `json:"dependsOn"`
+	Related   []int64 `json:"related"`
+}
+
+// links lists the new ticket's links.
+func (in NewTicket) links() []NewLink {
+	var out []NewLink
+	for _, id := range in.DependsOn {
+		out = append(out, NewLink{To: id, Kind: domain.LinkDependsOn})
+	}
+	for _, id := range in.Related {
+		out = append(out, NewLink{To: id, Kind: domain.LinkRelated})
+	}
+	return out
 }
 
 // titleFrom derives a short title from the idea's first line.
@@ -48,11 +64,24 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if err != nil {
 		return domain.Ticket{}, err
 	}
+	// It is created in the backlog with no start time, so the scheduler
+	// cannot start it before its links exist.
 	t := domain.Ticket{
 		ProjectID: p.ID, Kind: domain.KindTicket, Idea: strings.TrimSpace(in.Idea), Title: strings.TrimSpace(in.Title),
 		Status: domain.StatusBacklog, Stage: domain.StageExplore,
-		Agent: in.Agent, Model: in.Model, Effort: in.Effort, Prototypes: in.Prototypes, StartAt: in.StartAt,
+		Agent: in.Agent, Model: in.Model, Effort: in.Effort, Prototypes: in.Prototypes,
 		SpendCapUSD: o.DefaultTicketCap(ctx),
+	}
+	links := in.links()
+	seen := map[NewLink]bool{}
+	for _, l := range links {
+		if seen[l] {
+			return domain.Ticket{}, invalid("ticket %d is listed twice", l.To)
+		}
+		seen[l] = true
+		if _, err := o.linkTarget(ctx, t, l); err != nil {
+			return domain.Ticket{}, err
+		}
 	}
 	if t.Title == "" {
 		t.Title = titleFrom(t.Idea)
@@ -60,12 +89,15 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if t.Agent == "" {
 		t.Agent, t.Model, t.Effort = p.Agent, p.Model, p.Effort
 	}
-	if in.Start {
-		t.Status = domain.StatusReady
-	}
 	t, err = o.st.CreateTicket(ctx, t)
 	if err != nil {
 		return t, err
+	}
+	for _, l := range links {
+		// Nothing depends on a new ticket yet, so no link can close a loop.
+		if _, err := o.st.AddLink(ctx, t.ID, l.To, l.Kind, false); err != nil {
+			return t, err
+		}
 	}
 	body := t.Idea + fmt.Sprintf("\n\n---\n_Tracked by remote-agent (ticket %d)._", t.ID)
 	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, body); err != nil {
@@ -75,14 +107,24 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 		t.Issue = n
 	}
 	issue, note := t.Issue, t.StatusNote
-	// The scheduler may have picked the new ticket up already.
 	if t, err = o.mutate(ctx, t.ID, func(c *domain.Ticket) {
 		c.Issue = issue
 		if note != "" {
 			c.StatusNote = note
 		}
+		c.StartAt = in.StartAt
+		if in.Start {
+			c.Status = domain.StatusReady
+		}
 	}); err != nil {
 		return t, err
+	}
+	if len(links) > 0 {
+		ids := []int64{t.ID}
+		for _, l := range links {
+			ids = append(ids, l.To)
+		}
+		o.linksChanged(ctx, ids...)
 	}
 	o.bus.Publish(Message{Type: "board", ProjectID: p.ID})
 	o.Kick()
@@ -395,10 +437,22 @@ func (o *Orchestrator) DeleteTicket(ctx context.Context, id int64) error {
 	if ar := o.activeFor(id); ar != nil {
 		return fmt.Errorf("%w: stop it first", ErrBusy)
 	}
+	links, err := o.st.TicketLinks(ctx, id)
+	if err != nil {
+		return err
+	}
 	o.removeWorkspace(ctx, t)
 	if err := o.st.DeleteTicket(ctx, id); err != nil {
 		return err
 	}
 	o.bus.Publish(Message{Type: "board", ProjectID: t.ProjectID})
+	// The linked tickets' issues and cards now show it as deleted or gone.
+	ids := []int64{}
+	for _, l := range links {
+		if !l.Deleted {
+			ids = append(ids, l.TicketID)
+		}
+	}
+	o.linksChanged(ctx, ids...)
 	return nil
 }

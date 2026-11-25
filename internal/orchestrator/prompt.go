@@ -75,6 +75,11 @@ func writeGoalDir(workdir string, tc TicketContext) error {
 			return err
 		}
 	}
+	for id, doc := range tc.linkDocs {
+		if err := write(fmt.Sprintf("links/%d.md", id), doc); err != nil {
+			return err
+		}
+	}
 	if len(tc.Prototypes) > 0 {
 		raw, err := json.MarshalIndent(tc.Prototypes, "", "  ")
 		if err != nil {
@@ -108,7 +113,9 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 		tc.Ticket.Branch = t.Branch
 	}
 	job := t.Kind == domain.KindJob
+	var linked []domain.TicketLink
 	if !job {
+		linked = o.linkedTickets(ctx, &tc)
 		if err := writeGoalDir(ar.workdir, tc); err != nil {
 			return "", "", fmt.Errorf("write goal dir: %w", err)
 		}
@@ -147,6 +154,10 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 		}
 		line("- critical: no")
 		line("- review effort: medium")
+		if refs := o.updateFromBase(ar, linked); len(refs) > 0 {
+			line("- update from base: yes — %s merged after this branch was cut; merge origin/%s into the goal branch first",
+				strings.Join(refs, ", "), p.DefaultBranch)
+		}
 	}
 	if r := o.resumeReason(ctx, t); r != "" {
 		line("- resumed: %s", r)
@@ -157,6 +168,24 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 		line("## Idea")
 		line("")
 		line("%s", t.Idea)
+	}
+	if len(linked) > 0 {
+		line("")
+		line("## Linked tickets")
+		line("")
+		line("Set by the user; read each one's file. A dependency is merged before this ticket runs; a related ticket is context only.")
+		line("")
+		for _, l := range linked {
+			kind := "depends on"
+			if l.Kind == domain.LinkRelated {
+				kind = "related to"
+			}
+			status := string(l.Status)
+			if l.Deleted {
+				status = "deleted"
+			}
+			line("- %s %s — %s (%s): .ship/%s/links/%d.md", kind, l.Ref(), l.Title, status, goal, l.TicketID)
+		}
 	}
 	if !job {
 		var rounds []domain.Round
@@ -279,4 +308,53 @@ func (o *Orchestrator) resumeReason(ctx context.Context, t domain.Ticket) string
 		return "follow_up answered"
 	}
 	return ""
+}
+
+// linkedTickets returns the ticket's dependencies and related tickets, and
+// fills tc.linkDocs with each one's file: its issue, status and requirement
+// (or its idea, before it has one).
+func (o *Orchestrator) linkedTickets(ctx context.Context, tc *TicketContext) []domain.TicketLink {
+	var out []domain.TicketLink
+	tc.linkDocs = map[int64]string{}
+	for _, l := range tc.Links {
+		if l.Kind == domain.LinkBlocks {
+			continue
+		}
+		out = append(out, l)
+		var b strings.Builder
+		fmt.Fprintf(&b, "# %s — %s\n\n", l.Ref(), l.Title)
+		if l.Issue != 0 {
+			fmt.Fprintf(&b, "- issue: #%d https://github.com/%s/issues/%d\n", l.Issue, tc.Project.Repo, l.Issue)
+		}
+		lt, err := o.st.Ticket(ctx, l.TicketID)
+		if l.Deleted || err != nil {
+			b.WriteString("- status: deleted\n")
+			tc.linkDocs[l.TicketID] = b.String()
+			continue
+		}
+		fmt.Fprintf(&b, "- status: %s\n", lt.Status)
+		if lt.Branch != "" {
+			fmt.Fprintf(&b, "- branch: %s\n", lt.Branch)
+		}
+		if lt.Requirement != "" {
+			b.WriteString("\n## Requirement\n\n" + lt.Requirement + "\n")
+		} else {
+			b.WriteString("\n## Idea (no requirement yet)\n\n" + lt.Idea + "\n")
+		}
+		tc.linkDocs[l.TicketID] = b.String()
+	}
+	return out
+}
+
+// updateFromBase returns the dependencies that merged after the run's branch
+// was cut, and records them on the run so they are cleared once it starts.
+func (o *Orchestrator) updateFromBase(ar *activeRun, linked []domain.TicketLink) []string {
+	var refs []string
+	for _, l := range linked {
+		if l.Kind == domain.LinkDependsOn && l.NeedsUpdate && l.Finished() {
+			refs = append(refs, l.Ref())
+			ar.updated = append(ar.updated, l.ID)
+		}
+	}
+	return refs
 }

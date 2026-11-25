@@ -40,6 +40,25 @@ CREATE TABLE IF NOT EXISTS tickets (
 );
 CREATE INDEX IF NOT EXISTS tickets_project ON tickets(project_id, status);
 
+-- A link from one ticket to another: from depends on to, or the two are
+-- related (stored once, read from both ends). Deleting the from ticket
+-- removes the row; deleting the to ticket of a dependency keeps it as
+-- deleted, with a snapshot of its title and issue, so the dependent keeps
+-- waiting until the user removes the link.
+CREATE TABLE IF NOT EXISTS ticket_links (
+	id INTEGER PRIMARY KEY,
+	from_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	to_id INTEGER NOT NULL,
+	kind TEXT NOT NULL,
+	deleted INTEGER NOT NULL DEFAULT 0,
+	to_title TEXT NOT NULL DEFAULT '',
+	to_issue INTEGER NOT NULL DEFAULT 0,
+	needs_update INTEGER NOT NULL DEFAULT 0,
+	created_at TIMESTAMP NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ticket_links_pair ON ticket_links(from_id, to_id, kind) WHERE deleted = 0;
+CREATE INDEX IF NOT EXISTS ticket_links_to ON ticket_links(to_id);
+
 CREATE TABLE IF NOT EXISTS rounds (
 	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
 	n INTEGER NOT NULL,

@@ -88,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/tickets/{id}/resume", s.ticketAction("resume"))
 	h("POST /api/tickets/{id}/stop", s.ticketAction("stop"))
 	h("POST /api/tickets/{id}/message", s.message)
+	h("POST /api/tickets/{id}/links", s.addLink)
+	h("DELETE /api/tickets/{id}/links/{lid}", s.removeLink)
 	h("PUT /api/tickets/{id}/rounds/{n}/answers/{qid}", s.answer)
 	h("GET /api/tickets/{id}/runs", s.runs)
 	h("GET /api/tickets/{id}/runs/{runId}/events", s.runEvents)
