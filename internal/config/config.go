@@ -37,7 +37,8 @@ type Config struct {
 	ClaudeBin string `json:"claudeBin"`
 	PiBin     string `json:"piBin"`
 	BwrapBin  string `json:"bwrapBin"`
-	// Sandbox disables bubblewrap when false (tests, development).
+	// Sandbox runs agents in bubblewrap; it defaults to true when the key
+	// is absent, and only tests or development set it to false.
 	Sandbox bool `json:"sandbox"`
 	// SandboxPaths are bound read-only into every sandbox.
 	SandboxPaths []string `json:"sandboxPaths"`
@@ -61,7 +62,7 @@ type Config struct {
 
 // Load reads path and fills defaults.
 func Load(path string) (Config, error) {
-	var c Config
+	c := Config{Sandbox: true}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return c, fmt.Errorf("read config: %w", err)
@@ -100,7 +101,7 @@ func (c *Config) defaults() {
 
 // Default returns a config with every default set.
 func Default() Config {
-	var c Config
+	c := Config{Sandbox: true}
 	c.defaults()
 	return c
 }

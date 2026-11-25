@@ -88,6 +88,9 @@ jobs:
       - if: steps.present.outputs.e2e == 'true'
         uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
       - if: steps.present.outputs.e2e == 'true'
+        name: Allow unprivileged user namespaces (agents run in bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - if: steps.present.outputs.e2e == 'true'
         name: Playwright smoke test (browsers from nixpkgs via the dev shell)
         run: nix develop -c sh -c 'npm --prefix e2e ci && cd e2e && npx playwright test'
       - if: steps.present.outputs.e2e != 'true'

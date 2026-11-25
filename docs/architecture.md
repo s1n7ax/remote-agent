@@ -137,6 +137,14 @@ An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when
   "skillsSeedDir": "/nix/store/…/share/remote-agent/skills",
   "publicURL": "https://agent.tailnet.ts.net",
   "previewURL": "https://agent.tailnet.ts.net:8443",
-  "previewListen": "127.0.0.1:7702"
+  "previewListen": "127.0.0.1:7702",
+  "sandboxEnv": "/nix/store/…-remote-agent-sandbox-env", // its bin/ is the sandbox PATH
+  "sandboxPath": "",            // overrides sandboxEnv/bin
+  "sandbox": true,              // false runs agents without bubblewrap (dev/tests)
+  "ciPollSeconds": 60,
+  "githubApiUrl": "https://api.github.com",          // fakes in e2e
+  "githubGraphqlUrl": "https://api.github.com/graphql",
+  "gitUrl": "https://github.com",
+  "fakeAgents": false           // every run uses the scripted fake agent (e2e)
 }
 ```
