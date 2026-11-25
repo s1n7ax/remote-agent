@@ -169,8 +169,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, p)
-	return nil
+	return created(w, p)
 }
 
 func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) error {
@@ -192,18 +191,11 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	set := func(dst *string, v *string) {
-		if v != nil {
-			*dst = *v
-		}
-	}
-	set(&p.Name, in.Name)
-	set(&p.DefaultBranch, in.DefaultBranch)
-	set(&p.Model, in.Model)
-	set(&p.Effort, in.Effort)
-	if in.Agent != nil {
-		p.Agent = *in.Agent
-	}
+	setIf(&p.Name, in.Name)
+	setIf(&p.DefaultBranch, in.DefaultBranch)
+	setIf(&p.Model, in.Model)
+	setIf(&p.Effort, in.Effort)
+	setIf(&p.Agent, in.Agent)
 	if err := s.Store.UpdateProject(r.Context(), p); err != nil {
 		return err
 	}
@@ -253,8 +245,7 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, t)
-	return nil
+	return created(w, t)
 }
 
 // --- tickets ---
@@ -569,8 +560,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, sc)
-	return nil
+	return created(w, sc)
 }
 
 func validSchedule(sc *domain.Schedule) error {
@@ -609,17 +599,13 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	for dst, v := range map[*string]*string{&sc.Name: in.Name, &sc.Cron: in.Cron, &sc.Prompt: in.Prompt, &sc.Model: in.Model, &sc.Effort: in.Effort} {
-		if v != nil {
-			*dst = *v
-		}
-	}
-	if in.Agent != nil {
-		sc.Agent = *in.Agent
-	}
-	if in.Enabled != nil {
-		sc.Enabled = *in.Enabled
-	}
+	setIf(&sc.Name, in.Name)
+	setIf(&sc.Cron, in.Cron)
+	setIf(&sc.Prompt, in.Prompt)
+	setIf(&sc.Agent, in.Agent)
+	setIf(&sc.Model, in.Model)
+	setIf(&sc.Effort, in.Effort)
+	setIf(&sc.Enabled, in.Enabled)
 	if err := validSchedule(&sc); err != nil {
 		return err
 	}
@@ -671,8 +657,7 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.Orch.Kick()
-	writeJSON(w, http.StatusCreated, a)
-	return nil
+	return created(w, a)
 }
 
 func (s *Server) patchAccount(w http.ResponseWriter, r *http.Request) error {
@@ -692,12 +677,8 @@ func (s *Server) patchAccount(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	if in.Label != nil {
-		a.Label = *in.Label
-	}
-	if in.Priority != nil {
-		a.Priority = *in.Priority
-	}
+	setIf(&a.Label, in.Label)
+	setIf(&a.Priority, in.Priority)
 	if in.ClearLimited {
 		a.ExhaustedTill, a.Warning = nil, false
 	}

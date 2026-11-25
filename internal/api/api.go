@@ -196,6 +196,18 @@ func ok(w http.ResponseWriter, v any) error {
 	return nil
 }
 
+func created(w http.ResponseWriter, v any) error {
+	writeJSON(w, http.StatusCreated, v)
+	return nil
+}
+
+// setIf sets *dst to *v when a PATCH body carried the field.
+func setIf[T any](dst, v *T) {
+	if v != nil {
+		*dst = *v
+	}
+}
+
 func decode(r *http.Request, v any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
 	if err := dec.Decode(v); err != nil {
