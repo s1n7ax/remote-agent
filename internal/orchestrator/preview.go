@@ -135,7 +135,7 @@ func (o *Orchestrator) startPreview(ctx context.Context, ticketID int64, branch,
 	argv := []string{"bash", "-lc", command}
 	env := []string{"PATH=" + o.cfg.SandboxPATH, "HOME=" + o.homeDir(t.ProjectID), fmt.Sprintf("PORT=%d", port)}
 	if o.sandbox != nil {
-		argv, env = o.sandbox(o.projectDir(t.ProjectID), dir, nil)(argv, env)
+		argv, env = o.sandbox([]string{dir, o.homeDir(t.ProjectID)}, nil, dir)(argv, env)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir

@@ -34,7 +34,16 @@ func TestCommandShape(t *testing.T) {
 		t.Error("malformed env entry passed through")
 	}
 	if _, err := (Config{}).Command([]string{"x"}, nil); err == nil {
-		t.Error("want error without a project")
+		t.Error("want error without a project or workdir")
+	}
+	// Without a project, only the explicit binds are writable.
+	got, err = Config{Workdir: "/w", ReadWrite: []string{"/w", "/h"}, ReadOnly: []string{"/r"}}.Command([]string{"x"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = strings.Join(got, " ")
+	if !strings.Contains(s, "--ro-bind /r /r") || !strings.Contains(s, "--bind /w /w --bind /h /h --clearenv --chdir /w -- x") {
+		t.Errorf("workdir-only command:\n%s", s)
 	}
 	argv, env := Config{}.Wrap()([]string{"x"}, nil)
 	if argv[0] == "x" || env == nil {

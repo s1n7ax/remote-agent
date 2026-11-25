@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,11 +11,11 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/s1n7ax/remote-agent/internal/domain"
 	"github.com/s1n7ax/remote-agent/internal/questions"
@@ -219,49 +220,75 @@ func (o *Orchestrator) ToolUploadArtifact(ctx context.Context, runID int64, path
 	return o.storeArtifact(ctx, ar, path)
 }
 
-// storeArtifact copies a file into the artifact store. The path must resolve
-// (after symlinks) inside the project's directory: the app runs outside the
-// sandbox, so a symlink must not let a run read the app's own files.
+// storeArtifact copies a file into the artifact store. Relative paths
+// resolve against the run's workdir; the file must lie in the run's clone or
+// its $HOME, the only project dirs its sandbox can write. The app runs
+// outside the sandbox, so the file is opened once through an os.Root at that
+// dir (no component may be a symlink leading out of it, nor an absolute
+// symlink) and everything after reads that handle: swapping a path
+// component afterwards changes nothing.
 func (o *Orchestrator) storeArtifact(ctx context.Context, ar *activeRun, path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(ar.workdir, path)
 	}
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", invalid("artifact %s: %v", path, err)
+	path = filepath.Clean(path)
+	var base, rel string
+	for _, dir := range []string{ar.workdir, o.homeDir(ar.project.ID)} {
+		if r, err := filepath.Rel(dir, path); err == nil && r != ".." && !strings.HasPrefix(r, "../") {
+			base, rel = dir, r
+			break
+		}
 	}
-	root, err := filepath.EvalSymlinks(o.projectDir(ar.project.ID))
+	if base == "" {
+		return "", invalid("artifact %s is outside the run's clone and home", path)
+	}
+	root, err := os.OpenRoot(base)
 	if err != nil {
 		return "", err
 	}
-	if rel, err := filepath.Rel(root, real); err != nil || strings.HasPrefix(rel, "..") {
-		return "", invalid("artifact %s is outside the project directory", path)
+	defer root.Close()
+	// O_NONBLOCK: opening a planted FIFO must not hang the app.
+	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", invalid("artifact %s: %v", path, err)
 	}
-	info, err := os.Stat(real)
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return "", invalid("artifact %s is not a regular file", path)
 	}
-	if info.Size() > 20<<20 {
+	const maxSize = 20 << 20
+	if info.Size() > maxSize {
 		return "", invalid("artifact %s is larger than 20 MB", path)
 	}
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	id := hex.EncodeToString(b)
-	dst := o.cfg.Path("artifacts", id)
-	if err := copyFile(real, dst); err != nil {
+	if err := os.MkdirAll(o.cfg.Path("artifacts"), 0o700); err != nil {
 		return "", fmt.Errorf("store artifact: %w", err)
 	}
-	mt := mime.TypeByExtension(filepath.Ext(real))
-	if mt == "" {
-		f, err := os.Open(real)
-		if err == nil {
-			head := make([]byte, 512)
-			n, _ := io.ReadFull(f, head)
-			f.Close()
-			mt = http.DetectContentType(head[:n])
-		}
+	out, err := os.OpenFile(o.cfg.Path("artifacts", id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("store artifact: %w", err)
 	}
-	_, err = o.st.AddArtifact(ctx, domain.Artifact{ID: id, TicketID: ar.ticket.ID, RunID: ar.run.ID, Name: filepath.Base(real), MIME: mt, Size: info.Size()})
+	// The file may grow after Stat; never store more than the limit.
+	size, err := io.Copy(out, io.LimitReader(io.MultiReader(bytes.NewReader(head), f), maxSize))
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(o.cfg.Path("artifacts", id))
+		return "", fmt.Errorf("store artifact: %w", err)
+	}
+	mt := mime.TypeByExtension(filepath.Ext(path))
+	if mt == "" {
+		mt = http.DetectContentType(head)
+	}
+	_, err = o.st.AddArtifact(ctx, domain.Artifact{ID: id, TicketID: ar.ticket.ID, RunID: ar.run.ID, Name: filepath.Base(path), MIME: mt, Size: size})
 	return id, err
 }
 
@@ -307,13 +334,38 @@ func (o *Orchestrator) ToolSubmitProof(ctx context.Context, runID int64, verdict
 	return nil
 }
 
-// currentBranch returns the branch checked out in dir.
-func currentBranch(ctx context.Context, dir string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "symbolic-ref", "--short", "HEAD").Output()
+// currentBranch returns the branch checked out in the clone dir. The clone
+// is agent-writable, so it reads .git/HEAD (through an os.Root) instead of
+// running git there.
+func currentBranch(_ context.Context, dir string) (string, error) {
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return "", fmt.Errorf("read current branch: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	defer root.Close()
+	f, err := root.OpenFile(filepath.Join(".git", "HEAD"), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", fmt.Errorf("read current branch: %w", err)
+	}
+	defer f.Close()
+	head := make([]byte, 1024)
+	n, _ := io.ReadFull(f, head)
+	ref, ok := strings.CutPrefix(strings.TrimSpace(string(head[:n])), "ref: refs/heads/")
+	if !ok || ref == "" {
+		return "", invalid("the clone has no branch checked out")
+	}
+	return ref, nil
+}
+
+// pushBranch imports the branch from the run's clone into repo/ and pushes
+// it from there, so no git that reads the agent's config runs with the
+// token.
+func (o *Orchestrator) pushBranch(ctx context.Context, ar *activeRun, branch string) error {
+	if err := o.importBranch(ctx, ar.project.ID, ar.workdir, branch); err != nil {
+		return err
+	}
+	defer o.lockRepo(ar.project.ID)()
+	return o.gh.Push(ctx, ar.project.Repo, o.repoDir(ar.project.ID), branch)
 }
 
 // ticketBranch matches a ticket's goal branch, ra/<ticket id>-<slug>.
@@ -342,7 +394,7 @@ func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string,
 	} else if m := ticketBranch.FindStringSubmatch(branch); m != nil && m[1] != strconv.FormatInt(ar.ticket.ID, 10) {
 		return "", invalid("refusing to push %q: it is ticket %s's branch", branch, m[1])
 	}
-	if err := o.gh.Push(ctx, ar.project.Repo, ar.workdir, branch); err != nil {
+	if err := o.pushBranch(ctx, ar, branch); err != nil {
 		return "", err
 	}
 	o.event(ctx, ar, domain.EventSystem, "pushed "+branch)

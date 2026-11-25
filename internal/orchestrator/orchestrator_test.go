@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -739,8 +740,15 @@ func TestScheduleFiresJob(t *testing.T) {
 	if job.Kind != domain.KindJob || job.JobPrompt != "Look at open PRs" || !strings.HasPrefix(job.Title, "Triage — ") {
 		t.Fatalf("job ticket = %+v", job)
 	}
-	if r.Info.Workdir != h.o.repoDir(h.project.ID) {
-		t.Fatalf("job workdir = %s, want the project clone", r.Info.Workdir)
+	// Jobs get their own clone of the default branch, never repo/ itself.
+	if r.Info.Workdir != h.o.workDir(job) {
+		t.Fatalf("job workdir = %s, want its own clone %s", r.Info.Workdir, h.o.workDir(job))
+	}
+	if b := mustGit(t, r.Info.Workdir, "symbolic-ref", "--short", "HEAD"); b != "main" {
+		t.Fatalf("job clone branch = %q, want main", b)
+	}
+	if u := mustGit(t, r.Info.Workdir, "config", "remote.origin.url"); u != "https://github.com/acme/demo.git" {
+		t.Fatalf("job clone origin = %q, want the credential-free GitHub URL", u)
 	}
 	if !strings.Contains(r.Spec.Prompt, "## Job") || !strings.Contains(r.Spec.Prompt, "Look at open PRs") {
 		t.Fatalf("job prompt:\n%s", r.Spec.Prompt)
@@ -753,6 +761,10 @@ func TestScheduleFiresJob(t *testing.T) {
 	}
 	r.Sess.Finish(agent.Event{})
 	h.waitState(job.ID, domain.StatusDone, domain.StageJob)
+	eventually(t, "job clone removed", func() bool {
+		_, err := os.Stat(r.Info.Workdir)
+		return os.IsNotExist(err)
+	})
 	if h.notes.count(domain.NotifyJobDone) != 1 {
 		t.Fatal("no job_done notification")
 	}
@@ -772,8 +784,9 @@ func TestScheduleFiresJob(t *testing.T) {
 	}
 }
 
-// 8. upload_artifact accepts files in the project dir and rejects symlinks
-// (and paths) that resolve outside it.
+// 8. upload_artifact accepts files in the run's clone and home and rejects
+// symlinks (and paths) that resolve outside them: other parts of the project
+// dir included, absolute symlinks included (os.Root semantics).
 func TestUploadArtifactRejectsEscapes(t *testing.T) {
 	h := newHarness(t)
 	h.newTicket(domain.Ticket{})
@@ -792,14 +805,31 @@ func TestUploadArtifactRejectsEscapes(t *testing.T) {
 	if err := os.Symlink(sibling, filepath.Join(wd, "sib")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(wd, "shot.png"), filepath.Join(wd, "inside")); err != nil {
+	if err := os.Symlink(filepath.Join(wd, "shot.png"), filepath.Join(wd, "absinside")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("shot.png", filepath.Join(wd, "inside")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Dir(outside), filepath.Join(wd, "dirleak")); err != nil {
 		t.Fatal(err)
 	}
+	// A relative symlinked component climbing out of the clone into the
+	// rest of the project dir, and into the data dir.
+	if err := os.Symlink("../..", filepath.Join(wd, "up")); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(h.cfg.DataDir, "remote-agent.db")
+	writeFile(t, db, "secret db")
+	if err := syscall.Mkfifo(filepath.Join(wd, "fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repoFile := filepath.Join(h.o.repoDir(h.project.ID), "README.md")
 
-	for _, p := range []string{"leak", "sib", "dirleak/secret.txt", outside, "../../../../" + filepath.Base(h.cfg.DataDir), filepath.Join(h.cfg.DataDir, "..", "db.sqlite")} {
+	for _, p := range []string{
+		"leak", "sib", "dirleak/secret.txt", outside, "../../../../" + filepath.Base(h.cfg.DataDir), filepath.Join(h.cfg.DataDir, "..", "db.sqlite"),
+		"absinside", repoFile, "../../repo/README.md", "up/repo/README.md", "up/../../remote-agent.db", db, "fifo",
+	} {
 		id, err := h.o.ToolUploadArtifact(h.ctx, r.ID(), p)
 		if !errors.Is(err, ErrInvalid) {
 			t.Errorf("upload %s: id=%q err=%v, want ErrInvalid", p, id, err)
@@ -815,7 +845,8 @@ func TestUploadArtifactRejectsEscapes(t *testing.T) {
 		t.Fatalf("directory upload: err = %v", err)
 	}
 
-	for _, p := range []string{"shot.png", "inside", filepath.Join(wd, "shot.png")} {
+	writeFile(t, filepath.Join(h.o.homeDir(h.project.ID), "shots", "home.png"), "\x89PNG\r\n\x1a\n")
+	for _, p := range []string{"shot.png", "inside", filepath.Join(wd, "shot.png"), filepath.Join(h.o.homeDir(h.project.ID), "shots", "home.png")} {
 		id, err := h.o.ToolUploadArtifact(h.ctx, r.ID(), p)
 		if err != nil {
 			t.Fatalf("upload %s: %v", p, err)

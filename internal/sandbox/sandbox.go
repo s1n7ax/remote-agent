@@ -1,7 +1,7 @@
 // Package sandbox builds the bubblewrap command a run executes in. The
-// sandbox sees only its project directory (read-write, also $HOME), the
-// extra directories it is given and read-only system paths; every namespace
-// but the network is unshared and the environment is exactly the one passed.
+// sandbox sees only the directories it is given (read-write or read-only)
+// and read-only system paths; every namespace but the network is unshared
+// and the environment is exactly the one passed.
 package sandbox
 
 import (
@@ -27,13 +27,13 @@ var DefaultReadOnlyTry = []string{
 type Config struct {
 	// Bwrap is the bubblewrap executable; "bwrap" when empty.
 	Bwrap string
-	// Project is bound read-write; it is the agent's $HOME and default
-	// workdir.
+	// Project, when set, is bound read-write and is the default workdir.
 	Project string
 	// Workdir is the directory the command starts in; Project when empty.
+	// One of the two must be set.
 	Workdir string
-	// ReadWrite are extra read-write binds (e.g. a config dir kept outside
-	// the project).
+	// ReadWrite are (further) read-write binds, e.g. a run's ticket clone
+	// and its $HOME.
 	ReadWrite []string
 	// ReadOnly must exist and are bound read-only, after DefaultReadOnly.
 	ReadOnly []string
@@ -45,8 +45,8 @@ type Config struct {
 // Command returns the bwrap argv running argv with exactly env (KEY=VALUE)
 // inside the sandbox.
 func (c Config) Command(argv, env []string) ([]string, error) {
-	if c.Project == "" {
-		return nil, errors.New("sandbox: no project directory")
+	if c.Project == "" && c.Workdir == "" {
+		return nil, errors.New("sandbox: no project directory or workdir")
 	}
 	if len(argv) == 0 {
 		return nil, errors.New("sandbox: empty command")
@@ -78,7 +78,11 @@ func (c Config) Command(argv, env []string) ([]string, error) {
 		args = append(args, "--ro-bind-try", p, p)
 	}
 	// Read-write binds last, so they win over a read-only parent.
-	for _, p := range append([]string{c.Project}, c.ReadWrite...) {
+	rw := c.ReadWrite
+	if c.Project != "" {
+		rw = append([]string{c.Project}, rw...)
+	}
+	for _, p := range rw {
 		args = append(args, "--bind", p, p)
 	}
 	args = append(args, "--clearenv")
@@ -95,7 +99,7 @@ func (c Config) Command(argv, env []string) ([]string, error) {
 
 // Wrap adapts c to agent.Spec.Wrap. The returned environment for bwrap
 // itself is empty: the agent's environment travels as --setenv. A config
-// without a project yields a command that fails to start rather than an
+// without a project or workdir yields a command that fails to start rather than an
 // unsandboxed one.
 func (c Config) Wrap() func(argv, env []string) ([]string, []string) {
 	return func(argv, env []string) ([]string, []string) {

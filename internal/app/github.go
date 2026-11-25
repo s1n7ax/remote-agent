@@ -2,9 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/s1n7ax/remote-agent/internal/github"
@@ -168,31 +165,12 @@ func (g *GitHub) FailedLogs(ctx context.Context, repo string, c orchestrator.Che
 // Clone implements orchestrator.GitHub.
 func (g *GitHub) Clone(ctx context.Context, repo, dir string) error { return g.G.Clone(ctx, repo, dir) }
 
-// Fetch implements orchestrator.GitHub.
-func (g *GitHub) Fetch(ctx context.Context, dir string) error {
-	repo, err := originRepo(ctx, dir)
-	if err != nil {
-		return err
-	}
-	return g.G.Fetch(ctx, repo, dir)
-}
+// Fetch implements orchestrator.GitHub: it fetches the project's stored
+// repo, whatever the clone's own origin says.
+func (g *GitHub) Fetch(ctx context.Context, repo, dir string) error { return g.G.Fetch(ctx, repo, dir) }
 
 // Push implements orchestrator.GitHub.
 func (g *GitHub) Push(ctx context.Context, repo, dir, branch string) error {
 	_, err := g.G.PushBranch(ctx, repo, dir, branch)
 	return err
-}
-
-// originRepo returns owner/name from a checkout's origin remote.
-func originRepo(ctx context.Context, dir string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "get-url", "origin").Output()
-	if err != nil {
-		return "", fmt.Errorf("read origin of %s: %w", dir, err)
-	}
-	u := strings.TrimSuffix(strings.TrimSpace(string(out)), ".git")
-	parts := strings.Split(strings.ReplaceAll(u, ":", "/"), "/")
-	if len(parts) < 2 {
-		return "", fmt.Errorf("origin %q of %s is not a GitHub repository URL", u, dir)
-	}
-	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
 }

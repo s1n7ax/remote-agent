@@ -87,11 +87,14 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 		CIPoll: time.Duration(cfg.CIPollSeconds) * time.Second,
 	}
 	if cfg.Sandbox {
-		opts.Sandbox = func(projectDir, workdir string, ro []string) func(argv, env []string) ([]string, []string) {
+		opts.Sandbox = func(rw, ro []string, workdir string) func(argv, env []string) ([]string, []string) {
 			return sandbox.Config{
-				Bwrap: cfg.BwrapBin, Project: projectDir, Workdir: workdir,
+				Bwrap: cfg.BwrapBin, ReadWrite: rw, Workdir: workdir,
 				ReadOnly: append(append([]string{}, cfg.SandboxPaths...), ro...),
 			}.Wrap()
+		}
+		bench.Sandbox = func(workdir string) func(argv, env []string) ([]string, []string) {
+			return opts.Sandbox([]string{workdir}, nil, workdir)
 		}
 	}
 	orch := orchestrator.New(opts)

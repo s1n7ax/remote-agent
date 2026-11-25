@@ -42,6 +42,10 @@ type Bench struct {
 	outDir    string
 	// Env returns the environment for an eval run (a Claude account token).
 	Env func(ctx context.Context) ([]string, error)
+	// Sandbox, when set, wraps an eval run (which lets Claude use tools) so
+	// it sees only its work dir read-write, like an agent run. nil runs it
+	// unsandboxed (dev and tests only).
+	Sandbox func(workdir string) func(argv, env []string) ([]string, []string)
 
 	mu      sync.Mutex
 	running bool
@@ -160,9 +164,15 @@ func (b *Bench) run(ctx context.Context, snap, name string, env []string) Result
 	out := filepath.Join(work, "result.json")
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, b.claudeBin, "plugin", "eval", filepath.Join(work, name),
-		"--ablation", "with-without", "--no-publish", "--threshold", "0", "--json", out)
-	cmd.Env = append(env, "CLAUDE_CODE_WALNUT_SPIRE=1", "HOME="+work)
+	argv := []string{b.claudeBin, "plugin", "eval", filepath.Join(work, name),
+		"--ablation", "with-without", "--no-publish", "--threshold", "0", "--json", out}
+	env = append(append([]string{}, env...), "CLAUDE_CODE_WALNUT_SPIRE=1", "HOME="+work)
+	if b.Sandbox != nil {
+		argv, env = b.Sandbox(work)(argv, env)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = work
+	cmd.Env = env
 	if log, err := cmd.CombinedOutput(); err != nil {
 		if _, statErr := os.Stat(out); statErr != nil {
 			r.Error = fmt.Sprintf("%v: %s", err, tail(string(log), 2000))

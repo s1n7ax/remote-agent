@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"syscall"
 	"time"
 
 	"github.com/s1n7ax/remote-agent/internal/agent"
@@ -83,11 +86,17 @@ func (o *Orchestrator) markExhausted(ctx context.Context, accountID int64, till 
 	}
 }
 
+// sessionID is the shape of a Claude session id; the id comes from the
+// agent's output, so it is checked before it names a file.
+var sessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
 // resumeSession returns the session to resume for a run that continues a
 // stage interrupted by a usage limit, copying the transcript into the new
-// account's config dir when the account changed. It returns "" for a fresh
-// start.
-func (o *Orchestrator) resumeSession(ctx context.Context, ar *activeRun, cfgDir string) string {
+// account's config dir (cfgRel under home) when the account changed. It
+// returns "" for a fresh start. home is agent-writable, so the copy goes
+// through the os.Root at it: a transcript that is a symlink out of home is
+// not read, and the destination is created afresh.
+func (o *Orchestrator) resumeSession(ctx context.Context, ar *activeRun, home *os.Root, cfgRel string) string {
 	if ar.run.Agent != domain.AgentClaude {
 		return ""
 	}
@@ -106,36 +115,54 @@ func (o *Orchestrator) resumeSession(ctx context.Context, ar *activeRun, cfgDir 
 		}
 		break // only the run right before this one counts
 	}
-	if prev == nil {
+	if prev == nil || !sessionID.MatchString(prev.SessionID) {
 		return ""
 	}
 	if prev.AccountID == ar.run.AccountID {
 		return prev.SessionID
 	}
-	oldDir := filepath.Join(o.homeDir(ar.project.ID), ".claude-accounts", fmt.Sprint(prev.AccountID), "projects")
-	matches, _ := filepath.Glob(filepath.Join(oldDir, "*", prev.SessionID+".jsonl"))
-	if len(matches) == 0 {
+	oldRel := filepath.Join(".claude-accounts", fmt.Sprint(prev.AccountID), "projects")
+	d, err := home.Open(oldRel)
+	if err != nil {
 		return ""
 	}
-	src := matches[0]
-	dst := filepath.Join(cfgDir, "projects", filepath.Base(filepath.Dir(src)), filepath.Base(src))
-	if err := copyFile(src, dst); err != nil {
-		o.log.Warn("copy session for resume", "err", err)
-		return ""
+	entries, _ := d.ReadDir(-1)
+	d.Close()
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := prev.SessionID + ".jsonl"
+		src := filepath.Join(oldRel, e.Name(), name)
+		dst := filepath.Join(cfgRel, "projects", e.Name(), name)
+		if err := copyIn(home, src, dst); err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				o.log.Warn("copy session for resume", "err", err)
+			}
+			continue
+		}
+		return prev.SessionID
 	}
-	return prev.SessionID
+	return ""
 }
 
-func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
+// copyIn copies regular file src to a new file dst, both under root.
+func copyIn(root *os.Root, src, dst string) error {
+	in, err := root.OpenFile(src, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if fi, err := in.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+	if err := ensureDir(root, filepath.Dir(dst)); err != nil {
+		return err
+	}
+	if err := root.RemoveAll(dst); err != nil {
+		return err
+	}
+	out, err := root.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
