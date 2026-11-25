@@ -1,0 +1,85 @@
+name: daily
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - name: govulncheck
+        run: nix develop -c govulncheck ./...
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - name: npm audit (web, e2e)
+        run: |
+          status=0
+          for dir in web e2e; do
+            if [ -f "$dir/package-lock.json" ]; then
+              echo "::group::npm audit $dir"
+              nix develop -c npm --prefix "$dir" audit --audit-level=high || status=1
+              echo "::endgroup::"
+            else
+              echo "$dir/package-lock.json not present; skipping"
+            fi
+          done
+          exit "$status"
+
+  closure-vulns:
+    # Report only: a nixpkgs closure nearly always carries some open CVEs, so
+    # this does not fail the workflow. The flake.lock update PR below is the fix.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - name: vulnix on the droplet system closure (derivations, no build)
+        run: |
+          drv=$(nix eval --raw .#nixosConfigurations.droplet.config.system.build.toplevel.drvPath)
+          {
+            echo '## vulnix: droplet closure'
+            echo '```'
+            nix run nixpkgs#vulnix -- "$drv" || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  update-flake-lock:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - uses: DeterminateSystems/update-flake-lock@da03c0f078bc4b2c37ee4f7e072d34bf8f188bb3 # v29
+        with:
+          # PRs opened with GITHUB_TOKEN do not trigger CI; set a fine-grained
+          # PAT (contents + pull requests write) as FLAKE_LOCK_TOKEN to get CI
+          # on the update PR.
+          token: ${{ secrets.FLAKE_LOCK_TOKEN || github.token }}
+          pr-title: "chore(deps): update flake.lock"
+          commit-msg: "chore(deps): update flake.lock"
+          pr-labels: |
+            dependencies
