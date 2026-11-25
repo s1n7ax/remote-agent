@@ -2,9 +2,9 @@ package orchestrator
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,19 +92,17 @@ func TestDependencyHoldsTicketUntilMerged(t *testing.T) {
 		t.Fatalf("a dependency set before the first run needs no update:\n%s", r.Spec.Prompt)
 	}
 	goal := goalName(h.ticket(b.ID))
-	doc, err := os.ReadFile(filepath.Join(r.Spec.Workdir, ".ship", goal, "links", itoa(a.ID)+".md"))
+	doc, err := os.ReadFile(filepath.Join(r.Spec.Workdir, ".ship", goal, "links", fmt.Sprintf("%d.md", a.ID)))
 	if err != nil || !strings.Contains(string(doc), "REQ-A-TEXT") {
 		t.Fatalf("A's link file = %q, %v", doc, err)
 	}
-	doc, err = os.ReadFile(filepath.Join(r.Spec.Workdir, ".ship", goal, "links", itoa(c.ID)+".md"))
+	doc, err = os.ReadFile(filepath.Join(r.Spec.Workdir, ".ship", goal, "links", fmt.Sprintf("%d.md", c.ID)))
 	if err != nil || !strings.Contains(string(doc), "Polish the export page") {
 		t.Fatalf("C's link file = %q, %v", doc, err)
 	}
 	r.Sess.Finish(agent.Event{})
 	h.waitInactive(b.ID)
 }
-
-func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func TestFailedClosedOrDeletedDependencyKeepsWaiting(t *testing.T) {
 	h := newHarness(t)

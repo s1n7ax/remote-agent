@@ -12,7 +12,7 @@
   import Sheet from '../components/Sheet.svelte';
   import { api, subscribe } from '../lib/api';
   import { app } from '../lib/app.svelte';
-  import { clock, errorText, relative, toLocalInput, usd } from '../lib/format';
+  import { clock, errorText, relative, ticketRef, toLocalInput, usd } from '../lib/format';
   import { progress } from '../lib/questions';
   import { href, router } from '../lib/router.svelte';
   import { STATUS_LABEL, type LinkKind, type Project, type PullRequest, type Round, type Ticket, type TicketDetail, type TicketLink } from '../lib/types';
@@ -252,7 +252,7 @@
         <div class="empty"><p>No pull request yet.</p><p class="small">The build stage opens a draft PR.</p></div>
       {:else if pr}
         {#if unmerged.length}
-          <p class="note bad">Not merged yet: {unmerged.map((l) => (l.issue ? `#${l.issue}` : `ticket ${l.ticketId}`)).join(', ')}, which this ticket depends on. Merging is still your call.</p>
+          <p class="note bad">Not merged yet: {unmerged.map(ticketRef).join(', ')}, which this ticket depends on. Merging is still your call.</p>
         {/if}
         <PrPanel {pr} projectId={project.id} onmerged={() => (load(), loadPr())} />
       {:else if prError}

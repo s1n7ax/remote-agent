@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
+  import { ticketRef } from '../lib/format';
   import { href } from '../lib/router.svelte';
   import { LINK_LABEL, STATUSES, STATUS_LABEL, type LinkKind, type Ticket, type TicketLink } from '../lib/types';
   import Icon from './Icon.svelte';
@@ -42,8 +43,6 @@
 
   const offered = $derived(candidates.filter((t) => !links.some((l) => !l.deleted && l.ticketId === t.id && l.kind === kind)));
 
-  const ref = (x: { issue?: number; id?: number; ticketId?: number }) => (x.issue ? `#${x.issue}` : `ticket ${x.ticketId ?? x.id}`);
-
   async function add() {
     const t = candidates.find((c) => c.id === +to);
     if (!t) return;
@@ -76,15 +75,15 @@
           {#each list as l (l.id)}
             <li style:--lamp="var(--lamp-{l.status ?? 'backlog'})">
               {#if l.deleted}
-                <span class="target"><span class="ref">{ref(l)}</span> <span class="title">{l.title}</span></span>
+                <span class="target"><span class="ref">{ticketRef(l)}</span> <span class="title">{l.title}</span></span>
                 <span class="badge">deleted</span>
               {:else}
                 <a class="target" href={href({ name: 'ticket', projectId, ticketId: l.ticketId, tab: 'log' })}>
-                  <span class="ref">{ref(l)}</span> <span class="title">{l.title}</span>
+                  <span class="ref">{ticketRef(l)}</span> <span class="title">{l.title}</span>
                 </a>
                 <span class="badge status"><span class="lamp"></span>{l.status ? STATUS_LABEL[l.status] : ''}</span>
               {/if}
-              <button class="icon-btn" type="button" aria-label="Remove link to {ref(l)}" disabled={busy} onclick={() => remove(l)}>
+              <button class="icon-btn" type="button" aria-label="Remove link to {ticketRef(l)}" disabled={busy} onclick={() => remove(l)}>
                 <Icon name="x" size={18} />
               </button>
             </li>
@@ -100,7 +99,7 @@
     </select>
     <select bind:value={to} aria-label="Ticket to link">
       <option value="">Pick a ticket…</option>
-      {#each offered as t (t.id)}<option value={String(t.id)}>{ref(t)} {t.title} ({STATUS_LABEL[t.status]})</option>{/each}
+      {#each offered as t (t.id)}<option value={String(t.id)}>{ticketRef(t)} {t.title} ({STATUS_LABEL[t.status]})</option>{/each}
     </select>
     <button class="btn" type="button" disabled={busy || !to} onclick={add}>Add</button>
   </div>

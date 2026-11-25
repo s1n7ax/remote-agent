@@ -33,3 +33,12 @@ export function usd(n: number): string {
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+/**
+ * Names a ticket the way the user sees it: "#12" by its issue, or "ticket 5"
+ * by its id when it has no issue. Takes a ticket or a link (whose `ticketId`
+ * is the linked ticket's id).
+ */
+export function ticketRef(x: { issue?: number; id?: number; ticketId?: number }): string {
+  return x.issue ? `#${x.issue}` : `ticket ${x.ticketId ?? x.id}`;
+}
