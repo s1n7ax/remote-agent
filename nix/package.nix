@@ -25,7 +25,7 @@ let
   vendorHash = "sha256-IRyIjIhNkSseSaiX9MaCPCvdQKd+uQ+WnT2bgeOvqxU=";
 
   # npm dependencies hash of web/package-lock.json.
-  npmDepsHash = lib.fakeHash;
+  npmDepsHash = "sha256-aHRU98xuxSWZfCAj2wPMvCijfesHS8KNFBT8fhgVocE=";
 
   hasWeb = has "web/package.json";
   hasSkills = has "skills";
