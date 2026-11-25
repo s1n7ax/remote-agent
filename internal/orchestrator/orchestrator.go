@@ -88,6 +88,8 @@ type Orchestrator struct {
 	// tmu serialises mutate's read-modify-write of ticket rows, which
 	// the run watcher, MCP tool calls and the API make concurrently.
 	tmu sync.Mutex
+	// claimMu serialises job runs claiming a new branch.
+	claimMu sync.Mutex
 
 	mu       sync.Mutex
 	active   map[int64]*activeRun // by ticket id
@@ -141,11 +143,13 @@ func (o *Orchestrator) Kick() {
 
 // Run drives the scheduler until ctx ends, then stops every active run.
 func (o *Orchestrator) Run(ctx context.Context) error {
-	if err := o.migrateLayout(ctx); err != nil {
-		return err
-	}
-	if err := o.recover(ctx); err != nil {
-		return err
+	for _, f := range []func(context.Context) error{o.migrateLayout, o.recover} {
+		if err := f(ctx); err != nil {
+			if ctx.Err() != nil {
+				return nil // stopped while starting
+			}
+			return err
+		}
 	}
 	t := time.NewTicker(o.tick)
 	defer t.Stop()
@@ -180,16 +184,16 @@ func (o *Orchestrator) recover(ctx context.Context) error {
 		if err := o.st.UpdateRun(ctx, run); err != nil {
 			return err
 		}
-		t, err := o.st.Ticket(ctx, run.TicketID)
-		if err != nil {
-			continue
-		}
-		if t.Status == domain.StatusWorking {
+		_, err := o.update(ctx, run.TicketID, func(t *domain.Ticket) error {
+			if t.Status != domain.StatusWorking {
+				return errUnchanged
+			}
 			t.Status = domain.StatusReady
 			t.StatusNote = "resumed after a restart"
-			if err := o.st.UpdateTicket(ctx, &t); err != nil {
-				return err
-			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, errUnchanged) && !errors.Is(err, store.ErrNotFound) {
+			return err
 		}
 	}
 	return nil
@@ -218,19 +222,24 @@ func (o *Orchestrator) releaseTimers(ctx context.Context) error {
 		return err
 	}
 	now := o.now()
-	for _, t := range ts {
-		switch {
-		case t.Status == domain.StatusBacklog && t.StartAt != nil && !t.StartAt.After(now):
-			t.StartAt = nil
-			t.StatusNote = "started on schedule"
-		case t.Status == domain.StatusWaiting && t.Stage != domain.StageCI && t.WaitUntil != nil && !t.WaitUntil.After(now):
-			t.WaitUntil = nil
-			t.StatusNote = "usage limit reset"
-		default:
-			continue
-		}
-		t.Status = domain.StatusReady
-		if err := o.save(ctx, &t); err != nil {
+	for _, polled := range ts {
+		// Decided on the current row: the user may have changed the ticket
+		// since the list was read.
+		_, err := o.update(ctx, polled.ID, func(t *domain.Ticket) error {
+			switch {
+			case t.Status == domain.StatusBacklog && t.StartAt != nil && !t.StartAt.After(now):
+				t.StartAt = nil
+				t.StatusNote = "started on schedule"
+			case t.Status == domain.StatusWaiting && t.Stage != domain.StageCI && t.WaitUntil != nil && !t.WaitUntil.After(now):
+				t.WaitUntil = nil
+				t.StatusNote = "usage limit reset"
+			default:
+				return errUnchanged
+			}
+			t.Status = domain.StatusReady
+			return nil
+		})
+		if err != nil && !errors.Is(err, errUnchanged) {
 			return err
 		}
 	}
@@ -260,10 +269,18 @@ func (o *Orchestrator) startReady(ctx context.Context) error {
 		started, err := o.startRun(ctx, t)
 		if err != nil {
 			o.log.Error("start run", "ticket", t.ID, "err", err)
-			t.Status = domain.StatusFailed
-			t.StatusNote = err.Error()
-			_ = o.save(ctx, &t)
-			o.notify(ctx, domain.NotifyRunFailed, t, "Run failed to start: "+err.Error())
+			msg := err.Error()
+			cur, uerr := o.update(ctx, t.ID, func(c *domain.Ticket) error {
+				if c.Status != domain.StatusReady {
+					return errUnchanged // the user moved it meanwhile
+				}
+				c.Status = domain.StatusFailed
+				c.StatusNote = msg
+				return nil
+			})
+			if uerr == nil {
+				o.notify(ctx, domain.NotifyRunFailed, cur, "Run failed to start: "+msg)
+			}
 			continue
 		}
 		if started {
@@ -334,15 +351,28 @@ func (o *Orchestrator) save(ctx context.Context, t *domain.Ticket) error {
 }
 
 // mutate applies f to the ticket's current row and saves it, so concurrent
-// writers of different fields do not overwrite each other.
+// writers of different fields do not overwrite each other. Every write of a
+// ticket row goes through mutate, update or a path holding tmu; nothing
+// called with tmu held may call them.
 func (o *Orchestrator) mutate(ctx context.Context, id int64, f func(*domain.Ticket)) (domain.Ticket, error) {
+	return o.update(ctx, id, func(t *domain.Ticket) error { f(t); return nil })
+}
+
+// errUnchanged, returned by an update func, leaves the row as it is.
+var errUnchanged = errors.New("ticket unchanged")
+
+// update is mutate with a func that may refuse the change: when f returns
+// an error the row is not saved and update returns that error.
+func (o *Orchestrator) update(ctx context.Context, id int64, f func(*domain.Ticket) error) (domain.Ticket, error) {
 	o.tmu.Lock()
 	defer o.tmu.Unlock()
 	t, err := o.st.Ticket(ctx, id)
 	if err != nil {
 		return t, err
 	}
-	f(&t)
+	if err := f(&t); err != nil {
+		return t, err
+	}
 	return t, o.save(ctx, &t)
 }
 

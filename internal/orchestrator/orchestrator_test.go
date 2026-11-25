@@ -514,7 +514,7 @@ func TestBuildWithoutPRFails(t *testing.T) {
 	}
 }
 
-// 5. No Tool* method merges; only Orchestrator.Merge does.
+// 5. No Tool* method merges; only Orchestrator.MergeAt does.
 func TestOnlyUserMerges(t *testing.T) {
 	h := newHarness(t)
 	tk := h.newTicket(domain.Ticket{Stage: domain.StageBuild, Issue: 41})
@@ -595,7 +595,7 @@ func TestOnlyUserMerges(t *testing.T) {
 	if err := h.st.UpdateTicket(ctx, &cur); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.o.Merge(ctx, h.project.ID, cur.PR, "squash"); err != nil {
+	if err := h.o.MergeAt(ctx, h.project.ID, cur.PR, "squash", head.HeadSHA); err != nil {
 		t.Fatal(err)
 	}
 	if m := h.gh.mergeCalls(); len(m) != 1 || m[0] != strconv.Itoa(cur.PR)+":squash" {

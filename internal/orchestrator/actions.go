@@ -74,7 +74,14 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	} else {
 		t.Issue = n
 	}
-	if err := o.save(ctx, &t); err != nil {
+	issue, note := t.Issue, t.StatusNote
+	// The scheduler may have picked the new ticket up already.
+	if t, err = o.mutate(ctx, t.ID, func(c *domain.Ticket) {
+		c.Issue = issue
+		if note != "" {
+			c.StatusNote = note
+		}
+	}); err != nil {
 		return t, err
 	}
 	o.bus.Publish(Message{Type: "board", ProjectID: p.ID})
@@ -96,35 +103,33 @@ type TicketPatch struct {
 
 // PatchTicket applies a patch; agent/model/effort take effect on the next run.
 func (o *Orchestrator) PatchTicket(ctx context.Context, id int64, p TicketPatch) (domain.Ticket, error) {
-	t, err := o.st.Ticket(ctx, id)
+	t, err := o.mutate(ctx, id, func(t *domain.Ticket) {
+		if p.Title != nil && strings.TrimSpace(*p.Title) != "" {
+			t.Title = strings.TrimSpace(*p.Title)
+		}
+		if p.Agent != nil {
+			t.Agent = *p.Agent
+		}
+		if p.Model != nil {
+			t.Model = *p.Model
+		}
+		if p.Effort != nil {
+			t.Effort = *p.Effort
+		}
+		if p.Prototypes != nil {
+			t.Prototypes = *p.Prototypes
+		}
+		if p.StartAt != nil {
+			t.StartAt = p.StartAt
+		}
+		if p.ClearStart {
+			t.StartAt = nil
+		}
+		if p.SpendCap != nil {
+			t.SpendCapUSD = *p.SpendCap
+		}
+	})
 	if err != nil {
-		return t, err
-	}
-	if p.Title != nil && strings.TrimSpace(*p.Title) != "" {
-		t.Title = strings.TrimSpace(*p.Title)
-	}
-	if p.Agent != nil {
-		t.Agent = *p.Agent
-	}
-	if p.Model != nil {
-		t.Model = *p.Model
-	}
-	if p.Effort != nil {
-		t.Effort = *p.Effort
-	}
-	if p.Prototypes != nil {
-		t.Prototypes = *p.Prototypes
-	}
-	if p.StartAt != nil {
-		t.StartAt = p.StartAt
-	}
-	if p.ClearStart {
-		t.StartAt = nil
-	}
-	if p.SpendCap != nil {
-		t.SpendCapUSD = *p.SpendCap
-	}
-	if err := o.save(ctx, &t); err != nil {
 		return t, err
 	}
 	o.Kick()
@@ -133,17 +138,16 @@ func (o *Orchestrator) PatchTicket(ctx context.Context, id int64, p TicketPatch)
 
 // StartTicket queues a backlog (or failed) ticket's next stage now.
 func (o *Orchestrator) StartTicket(ctx context.Context, id int64) (domain.Ticket, error) {
-	t, err := o.st.Ticket(ctx, id)
+	t, err := o.update(ctx, id, func(t *domain.Ticket) error {
+		if t.Status != domain.StatusBacklog && t.Status != domain.StatusFailed {
+			return invalid("ticket is %s; only backlog or failed tickets can be started", t.Status)
+		}
+		t.Status = domain.StatusReady
+		t.StartAt = nil
+		t.StatusNote = ""
+		return nil
+	})
 	if err != nil {
-		return t, err
-	}
-	if t.Status != domain.StatusBacklog && t.Status != domain.StatusFailed {
-		return t, invalid("ticket is %s; only backlog or failed tickets can be started", t.Status)
-	}
-	t.Status = domain.StatusReady
-	t.StartAt = nil
-	t.StatusNote = ""
-	if err := o.save(ctx, &t); err != nil {
 		return t, err
 	}
 	o.Kick()
@@ -153,25 +157,26 @@ func (o *Orchestrator) StartTicket(ctx context.Context, id int64) (domain.Ticket
 // RetryTicket re-runs a failed ticket's stage (resetting fix rounds when it
 // failed on them).
 func (o *Orchestrator) RetryTicket(ctx context.Context, id int64) (domain.Ticket, error) {
-	t, err := o.st.Ticket(ctx, id)
+	t, err := o.update(ctx, id, func(t *domain.Ticket) error {
+		if t.Status != domain.StatusFailed {
+			return invalid("only failed tickets can be retried")
+		}
+		if t.Stage == domain.StageFix || t.Stage == domain.StageCI {
+			t.FixRounds = 0
+		}
+		if t.Stage == domain.StageCI {
+			t.Status = domain.StatusWaiting
+		} else {
+			t.Status = domain.StatusReady
+		}
+		t.StatusNote = "retrying"
+		return nil
+	})
 	if err != nil {
 		return t, err
 	}
-	if t.Status != domain.StatusFailed {
-		return t, invalid("only failed tickets can be retried")
-	}
-	if t.Stage == domain.StageFix || t.Stage == domain.StageCI {
-		t.FixRounds = 0
-	}
 	if t.Stage == domain.StageCI {
-		t.Status = domain.StatusWaiting
 		o.RecheckCI(t.ID)
-	} else {
-		t.Status = domain.StatusReady
-	}
-	t.StatusNote = "retrying"
-	if err := o.save(ctx, &t); err != nil {
-		return t, err
 	}
 	o.Kick()
 	return t, nil
@@ -320,15 +325,11 @@ func (o *Orchestrator) OpenRound(ctx context.Context, ticketID int64) (*domain.R
 	return nil, nil
 }
 
-// Merge merges a ticket's (or any project's) PR. Only the user's explicit
-// merge button reaches this; agents have no path to it.
-func (o *Orchestrator) Merge(ctx context.Context, projectID int64, number int, method string) error {
-	return o.MergeAt(ctx, projectID, number, method, "")
-}
-
-// MergeAt is Merge with the head SHA the user saw. A ticket's PR merges only
-// at the commit its verify run tested (seenSHA is ignored); any other PR
-// merges at seenSHA, or at its current head when seenSHA is empty.
+// MergeAt merges a ticket's (or any project's) PR. Only the user's explicit
+// merge button reaches this; agents have no path to it. A ticket's PR merges only
+// when the commit its verify run tested, the PR's head and the head the user
+// reviewed (seenSHA) are one commit; any other PR merges at seenSHA, or at
+// its current head when seenSHA is empty.
 func (o *Orchestrator) MergeAt(ctx context.Context, projectID int64, number int, method, seenSHA string) error {
 	p, err := o.st.Project(ctx, projectID)
 	if err != nil {
@@ -354,6 +355,10 @@ func (o *Orchestrator) MergeAt(ctx context.Context, projectID int64, number int,
 			o.RecheckCI(t.ID)
 			return invalid("PR #%d head %s is not the verified commit %s; it must be verified again before merging",
 				number, shortSHA(pr.HeadSHA), shortSHA(t.VerifiedSHA))
+		}
+		if seenSHA == "" || seenSHA != t.VerifiedSHA {
+			return invalid("the PR changed since you looked; review it again (you saw %s, the verified head is %s)",
+				shortSHA(seenSHA), shortSHA(t.VerifiedSHA))
 		}
 		head = t.VerifiedSHA
 		break

@@ -222,6 +222,18 @@ func TestGitInRealSandbox(t *testing.T) {
 	if err := h.o.refreshClone(h.ctx, tk.ProjectID, r.Info.Workdir); err != nil {
 		t.Fatalf("sandboxed refresh: %v", err)
 	}
+	// Bringing the checkout to a PR head pushed from elsewhere.
+	moved := externalPush(t, h, branch, "elsewhere.txt")
+	n := h.gh.addPull(PullState{Branch: branch, HeadSHA: moved})
+	cur := h.ticket(tk.ID)
+	cur.PR = n
+	head, at, err := h.o.checkoutPRHead(h.ctx, h.project, cur, r.Info.Workdir, true)
+	if err != nil || head != moved || !at {
+		t.Fatalf("sandboxed checkout of the PR head = %s, %v, %v; want %s", head, at, err, moved)
+	}
+	if got := mustGit(t, r.Info.Workdir, "rev-parse", "HEAD"); got != moved {
+		t.Fatalf("checkout at %s, want %s", got, moved)
+	}
 	_ = r.Sess.Stop()
 }
 

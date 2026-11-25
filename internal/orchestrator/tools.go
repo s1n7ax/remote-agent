@@ -359,22 +359,39 @@ func currentBranch(_ context.Context, dir string) (string, error) {
 
 // pushBranch imports the branch from the run's clone into repo/ and pushes
 // it from there, so no git that reads the agent's config runs with the
-// token.
+// token. The branch lands in a staging ref first and becomes refs/heads/
+// <branch> only once checkChangedPaths accepts it.
 func (o *Orchestrator) pushBranch(ctx context.Context, ar *activeRun, branch string) error {
-	if err := o.importBranch(ctx, ar.project.ID, ar.workdir, branch); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	if err := checkBranchName(ctx, branch); err != nil {
 		return err
 	}
 	defer o.lockRepo(ar.project.ID)()
-	return o.gh.Push(ctx, ar.project.Repo, o.repoDir(ar.project.ID), branch)
+	repo := o.repoDir(ar.project.ID)
+	staged := "refs/remote-agent/import/" + branch
+	if err := o.importBranch(ctx, ar.project.ID, ar.workdir, branch, staged); err != nil {
+		return err
+	}
+	defer func() { _ = gitQuiet(context.WithoutCancel(ctx), repo, "update-ref", "-d", staged) }()
+	if err := checkChangedPaths(ctx, repo, staged, ar.project.DefaultBranch, branch); err != nil {
+		return err
+	}
+	if err := git(ctx, "-C", repo, "update-ref", "refs/heads/"+branch, staged); err != nil {
+		return err
+	}
+	return o.gh.Push(ctx, ar.project.Repo, repo, branch)
 }
 
 // ticketBranch matches a ticket's goal branch, ra/<ticket id>-<slug>.
 var ticketBranch = regexp.MustCompile(`^ra/([0-9]+)-`)
 
-// ToolPushBranch pushes the branch checked out in the run's workdir: a
-// ticket's run only its own goal branch, a job's run any branch but the
-// default one and the tickets' goal branches. The GitHub layer refuses the
-// default branch too.
+// ToolPushBranch pushes the branch checked out in the run's workdir. A
+// ticket's run pushes only its own branch. A job's run, until it has one,
+// may push one new branch: not the default branch, not a branch that is
+// on GitHub already (another PR's, say) and not another ticket's; the first
+// push claims it as the job's branch. The GitHub layer refuses the default
+// branch too.
 func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string, error) {
 	ar, err := o.runByID(runID)
 	if err != nil {
@@ -387,21 +404,69 @@ func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string,
 	if branch == ar.project.DefaultBranch {
 		return "", invalid("refusing to push the default branch %q", branch)
 	}
-	if own := ar.ticket.Branch; own != "" || ar.ticket.Kind != domain.KindJob {
-		if branch != own {
-			return "", invalid("refusing to push %q: this ticket pushes only its branch %q", branch, own)
+	t, err := o.st.Ticket(ctx, ar.ticket.ID)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case t.Branch != "":
+		if branch != t.Branch {
+			return "", invalid("refusing to push %q: this ticket pushes only its branch %q", branch, t.Branch)
 		}
-	} else if m := ticketBranch.FindStringSubmatch(branch); m != nil && m[1] != strconv.FormatInt(ar.ticket.ID, 10) {
-		return "", invalid("refusing to push %q: it is ticket %s's branch", branch, m[1])
+	case t.Kind != domain.KindJob:
+		return "", invalid("refusing to push %q: this ticket has no branch yet", branch)
+	default:
+		if err := o.claimJobBranch(ctx, ar, branch); err != nil {
+			return "", err
+		}
 	}
 	if err := o.pushBranch(ctx, ar, branch); err != nil {
 		return "", err
 	}
 	o.event(ctx, ar, domain.EventSystem, "pushed "+branch)
-	if ar.ticket.PR != 0 {
+	if t.PR != 0 {
 		o.RecheckCI(ar.ticket.ID)
 	}
 	return branch, nil
+}
+
+// claimJobBranch makes branch the job's own branch if no one else has it.
+func (o *Orchestrator) claimJobBranch(ctx context.Context, ar *activeRun, branch string) error {
+	if m := ticketBranch.FindStringSubmatch(branch); m != nil && m[1] != strconv.FormatInt(ar.ticket.ID, 10) {
+		return invalid("refusing to push %q: it is ticket %s's branch", branch, m[1])
+	}
+	if err := checkBranchName(ctx, branch); err != nil {
+		return err
+	}
+	o.claimMu.Lock()
+	defer o.claimMu.Unlock()
+	// What is on GitHub now, not at the run's start.
+	if err := o.syncRepo(ctx, ar.project); err != nil {
+		return err
+	}
+	repo := o.repoDir(ar.project.ID)
+	for _, ref := range []string{"refs/remotes/origin/" + branch, "refs/heads/" + branch} {
+		if gitQuiet(ctx, repo, "rev-parse", "--verify", "--quiet", ref) == nil {
+			return invalid("refusing to push %q: the branch exists already; a job pushes only a new branch of its own", branch)
+		}
+	}
+	ts, err := o.st.ProjectTickets(ctx, ar.project.ID)
+	if err != nil {
+		return err
+	}
+	for _, other := range ts {
+		if other.ID != ar.ticket.ID && other.Branch == branch {
+			return invalid("refusing to push %q: it is ticket %d's branch", branch, other.ID)
+		}
+	}
+	_, err = o.update(ctx, ar.ticket.ID, func(t *domain.Ticket) error {
+		if t.Branch != "" && t.Branch != branch {
+			return invalid("refusing to push %q: this job pushes only its branch %q", branch, t.Branch)
+		}
+		t.Branch = branch
+		return nil
+	})
+	return err
 }
 
 // ToolOpenPR opens the ticket's PR (pushing first), or updates it when one

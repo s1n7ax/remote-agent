@@ -179,7 +179,7 @@ func TestInReviewHeadMovedReverifies(t *testing.T) {
 	}
 }
 
-// Merge merges only the verified head of a ticket's PR.
+// MergeAt merges only the verified head of a ticket's PR.
 func TestMergeRefusesUnverifiedHead(t *testing.T) {
 	h := newHarness(t)
 	h.o.Drain(true)
@@ -187,7 +187,7 @@ func TestMergeRefusesUnverifiedHead(t *testing.T) {
 	n := h.gh.addPull(PullState{Branch: "ra/1-x", HeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", CI: "success"})
 	tk := h.newTicket(domain.Ticket{Stage: domain.StageCI, Status: domain.StatusInReview, PR: n, VerifiedSHA: verified})
 
-	err := h.o.Merge(h.ctx, h.project.ID, n, "squash")
+	err := h.o.MergeAt(h.ctx, h.project.ID, n, "squash", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "verified") {
 		t.Fatalf("merge of an unverified head: err = %v, want ErrInvalid", err)
 	}
@@ -204,7 +204,7 @@ func TestMergeRefusesUnverifiedHead(t *testing.T) {
 	if err := h.st.UpdateTicket(h.ctx, &cur); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.o.Merge(h.ctx, h.project.ID, n, "squash"); !errors.Is(err, ErrInvalid) {
+	if err := h.o.MergeAt(h.ctx, h.project.ID, n, "squash", verified); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("merge of an unverified ticket: err = %v, want ErrInvalid", err)
 	}
 
@@ -216,7 +216,11 @@ func TestMergeRefusesUnverifiedHead(t *testing.T) {
 	if err := h.st.UpdateTicket(h.ctx, &cur); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.o.Merge(h.ctx, h.project.ID, n, "squash"); err != nil {
+	// The user must have seen the verified head.
+	if err := h.o.MergeAt(h.ctx, h.project.ID, n, "squash", ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("merge without the head the user saw: err = %v, want ErrInvalid", err)
+	}
+	if err := h.o.MergeAt(h.ctx, h.project.ID, n, "squash", verified); err != nil {
 		t.Fatal(err)
 	}
 	if m := h.gh.mergeHeads(); len(m) != 1 || m[0] != verified {
@@ -338,9 +342,9 @@ func TestVerifyRecordsTheTestedCommit(t *testing.T) {
 	}
 }
 
-// A PR head the checkout does not hold (pushed from elsewhere) cannot be
-// re-verified from it: the ticket fails instead of looping.
-func TestVerifyOnStaleCheckoutFails(t *testing.T) {
+// A PR head that never reaches the branch on GitHub cannot be checked out
+// for the next verify run: the ticket fails instead of looping.
+func TestVerifyOnUnfetchableHeadFails(t *testing.T) {
 	h := newHarness(t)
 	tk := h.newTicket(domain.Ticket{Stage: domain.StageBuild})
 	n, _ := buildToPR(t, h, tk)

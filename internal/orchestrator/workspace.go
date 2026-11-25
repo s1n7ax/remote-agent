@@ -74,6 +74,19 @@ func branchName(t domain.Ticket) string {
 // gitTimeout bounds every git command the app runs.
 const gitTimeout = 10 * time.Minute
 
+// cloneGitTimeout bounds each git command the app runs in an agent's clone,
+// and checkoutTimeout all of checkoutPRHead: the agent can make git block
+// (a FIFO as .git/HEAD, say), and runs start from the scheduler loop.
+// Variables so tests can shorten them.
+var (
+	cloneGitTimeout = 2 * time.Minute
+	checkoutTimeout = 3 * time.Minute
+)
+
+// gitWaitDelay is how long a killed git's output pipes may stay open (held
+// by a process it started) before Wait gives up on them.
+const gitWaitDelay = 5 * time.Second
+
 // prepareWorkspace makes sure the project clone is up to date and the
 // ticket has its own clone, and returns that clone. Jobs get a clone of the
 // default branch.
@@ -259,18 +272,16 @@ func (o *Orchestrator) refreshClone(ctx context.Context, projectID int64, work s
 	return o.gitSandboxed(ctx, []string{work}, []string{repo}, work, args...)
 }
 
-// importBranch copies refs/heads/<branch> of the agent's clone src into
-// repo/, from where it is pushed. git fetch runs in repo/ (the app's
+// importBranch copies refs/heads/<branch> of the agent's clone src into ref
+// of repo/, from where it is pushed. git fetch runs in repo/ (the app's
 // config); only upload-pack reads src, and it runs in a sandbox that sees
-// src read-only, so a .git pointing elsewhere reads nothing but src.
-func (o *Orchestrator) importBranch(ctx context.Context, projectID int64, src, branch string) error {
-	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+// src read-only, so a .git pointing elsewhere reads nothing but src. The
+// caller holds the repo lock and has checked the branch name.
+func (o *Orchestrator) importBranch(ctx context.Context, projectID int64, src, branch, ref string) error {
+	// upload-pack reads the agent's clone, which can make it block; the
+	// caller holds the repo lock meanwhile.
+	ctx, cancel := context.WithTimeout(ctx, cloneGitTimeout)
 	defer cancel()
-	if err := checkBranchName(ctx, branch); err != nil {
-		return err
-	}
-	defer o.lockRepo(projectID)()
-	ref := "refs/heads/" + branch
 	up := append([]string{gitBin()}, hardening...)
 	up = append(up, "upload-pack")
 	if o.sandbox != nil {
@@ -278,11 +289,47 @@ func (o *Orchestrator) importBranch(ctx context.Context, projectID int64, src, b
 	}
 	err := git(ctx, "-C", o.repoDir(projectID), "-c", "fetch.fsckObjects=true",
 		"fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules",
-		"--upload-pack="+shellJoin(up), "--", src, "+"+ref+":"+ref)
+		"--upload-pack="+shellJoin(up), "--", src, "+refs/heads/"+branch+":"+ref)
 	if err != nil {
 		return fmt.Errorf("read branch %s from the run's clone: %w", branch, err)
 	}
 	return nil
+}
+
+// protectedPaths are path prefixes a pushed branch may not change: what is
+// under .github/ (workflows, actions, CODEOWNERS) decides what CI runs, and
+// CI may run with a token that can write to the repository.
+var protectedPaths = []string{".github/"}
+
+// checkChangedPaths refuses ref (in repo/, trusted) when it changes a
+// protected path relative to its merge base with the default branch.
+func checkChangedPaths(ctx context.Context, repo, ref, defaultBranch, branch string) error {
+	base, err := gitOutput(ctx, repo, "merge-base", "refs/remotes/origin/"+defaultBranch, ref)
+	if err != nil {
+		return invalid("refusing to push %q: it shares no history with %q", branch, defaultBranch)
+	}
+	out, err := gitOutput(ctx, repo, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv",
+		strings.TrimSpace(base), ref, "--")
+	if err != nil {
+		return fmt.Errorf("list the paths %s changes: %w", branch, err)
+	}
+	var hit []string
+	for _, p := range strings.Split(out, "\x00") {
+		for _, pre := range protectedPaths {
+			if len(p) >= len(pre) && strings.EqualFold(p[:len(pre)], pre) {
+				hit = append(hit, p)
+			}
+		}
+	}
+	if len(hit) == 0 {
+		return nil
+	}
+	if len(hit) > 5 {
+		hit = append(hit[:5], "…")
+	}
+	return invalid("refusing to push %q: it changes %s. Files under .github/ decide what CI runs, so agents may not "+
+		"change them. Undo those changes (restore them from %s), and describe the workflow change that is needed in "+
+		"the PR body, or ask the user in a follow_up question, so the user can apply it", branch, strings.Join(hit, ", "), defaultBranch)
 }
 
 // checkBranchName accepts plain branch names only.
@@ -402,11 +449,27 @@ func gitBin() string { return gitPath() }
 func git(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, gitBin(), append(append([]string{}, hardening...), args...)...)
 	cmd.Env = gitEnv()
+	cmd.WaitDelay = gitWaitDelay
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// gitOutput runs hardened git on the host in dir and returns its stdout.
+// dir must be the app's own repo/: never an agent-writable clone.
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, gitBin(), append(append([]string{}, hardening...), append([]string{"-C", dir}, args...)...)...)
+	cmd.Env = gitEnv()
+	cmd.WaitDelay = gitWaitDelay
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return string(out), nil
 }
 
 // gitQuiet runs hardened git in dir (when set) and only reports failure.
@@ -416,24 +479,145 @@ func gitQuiet(ctx context.Context, dir string, args ...string) error {
 	}
 	cmd := exec.CommandContext(ctx, gitBin(), append(append([]string{}, hardening...), args...)...)
 	cmd.Env = gitEnv()
+	cmd.WaitDelay = gitWaitDelay
 	return cmd.Run()
 }
 
 // gitSandboxed runs hardened git in dir inside a sandbox seeing rw and ro
 // (unsandboxed when the orchestrator has no sandbox).
 func (o *Orchestrator) gitSandboxed(ctx context.Context, rw, ro []string, dir string, args ...string) error {
+	_, err := o.gitSandboxedOutput(ctx, rw, ro, dir, args...)
+	return err
+}
+
+// gitSandboxedOutput is gitSandboxed returning stdout. The output comes
+// from git reading agent-controlled files: treat it as untrusted.
+func (o *Orchestrator) gitSandboxedOutput(ctx context.Context, rw, ro []string, dir string, args ...string) (string, error) {
 	argv := append(append([]string{gitBin()}, hardening...), append([]string{"-C", dir}, args...)...)
 	env := gitEnv()
 	if o.sandbox != nil {
 		argv, env = o.sandbox(rw, ro, dir)(argv, o.sandboxGitEnv())
 	}
+	ctx, cancel := context.WithTimeout(ctx, cloneGitTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	cmd.WaitDelay = gitWaitDelay
+	// Output is capped: a hostile clone must not make the app buffer
+	// without bound.
+	var stdout, stderr limitedBuffer
+	stdout.max, stderr.max = 1<<20, 64<<10
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return nil
+	return stdout.String(), nil
+}
+
+// limitedBuffer keeps the first max bytes written to it.
+type limitedBuffer struct {
+	strings.Builder
+	max int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if room := b.max - b.Len(); room > 0 {
+		if len(p) > room {
+			b.Builder.Write(p[:room])
+		} else {
+			b.Builder.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+// isSHA reports whether s is a full hex object name (SHA-1 or SHA-256).
+func isSHA(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// checkoutPRHead makes the ticket's branch in its clone hold the head of its
+// PR as GitHub reports it, before a verify or fix run: a commit pushed to the
+// PR by someone else (GitHub's "Update branch", a bot) would otherwise leave
+// the checkout stale. The branch is fast-forwarded (git reset --keep) when it
+// has no commits beyond the PR head. When it has, a fix run keeps them, and a
+// verify run checks the PR head out detached, so it tests exactly that
+// commit while the branch keeps the unpushed work. It returns the PR head
+// and whether the checkout is at it. Git in the clone runs sandboxed.
+func (o *Orchestrator) checkoutPRHead(ctx context.Context, p domain.Project, t domain.Ticket, work string, detach bool) (string, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, checkoutTimeout)
+	defer cancel()
+	pr, err := o.gh.Pull(ctx, p.Repo, t.PR)
+	if err != nil {
+		return "", false, fmt.Errorf("read PR #%d: %w", t.PR, err)
+	}
+	head := pr.HeadSHA
+	if !isSHA(head) {
+		return "", false, fmt.Errorf("PR #%d has no valid head commit (%q)", t.PR, head)
+	}
+	if pr.Branch != "" && pr.Branch != t.Branch {
+		return "", false, fmt.Errorf("PR #%d is on branch %q, not the ticket's %q", t.PR, pr.Branch, t.Branch)
+	}
+	repo := o.repoDir(p.ID)
+	remote := "refs/remotes/origin/" + t.Branch
+	has := func() bool {
+		out, err := gitOutput(ctx, repo, "rev-parse", "--verify", "--quiet", remote+"^{commit}")
+		return err == nil && strings.TrimSpace(out) == head
+	}
+	if !has() {
+		// GitHub's API can be ahead of the last fetch.
+		if err := o.syncRepo(ctx, p); err != nil {
+			return "", false, err
+		}
+		if !has() {
+			return "", false, fmt.Errorf("the head %s of PR #%d is not on branch %s on GitHub", shortSHA(head), t.PR, t.Branch)
+		}
+		if err := o.refreshClone(ctx, p.ID, work); err != nil {
+			return "", false, fmt.Errorf("refresh the ticket's clone: %w", err)
+		}
+	}
+	rw, ro := []string{work}, []string(nil)
+	sgit := func(args ...string) (string, error) {
+		out, err := o.gitSandboxedOutput(ctx, rw, ro, work, args...)
+		return strings.TrimSpace(out), err
+	}
+	local := "refs/heads/" + t.Branch
+	if cur, err := currentBranch(ctx, work); err != nil || cur != t.Branch {
+		args := []string{"checkout", "-q", t.Branch}
+		if _, err := sgit("rev-parse", "--verify", "--quiet", local+"^{commit}"); err != nil {
+			args = []string{"checkout", "-q", "-b", t.Branch, head}
+		}
+		if _, err := sgit(args...); err != nil {
+			return "", false, fmt.Errorf("check out %s in the ticket's clone: %w", t.Branch, err)
+		}
+	}
+	tip, err := sgit("rev-parse", "--verify", "--quiet", local+"^{commit}")
+	if err != nil {
+		return "", false, fmt.Errorf("read %s in the ticket's clone: %w", t.Branch, err)
+	}
+	if tip != head {
+		if _, err := sgit("merge-base", "--is-ancestor", tip, head); err == nil {
+			// No unpushed commits: move the branch to the PR head, keeping
+			// uncommitted changes that do not conflict.
+			if _, err := sgit("reset", "-q", "--keep", head); err != nil {
+				return "", false, fmt.Errorf("update %s in the ticket's clone to the PR head %s: %w", t.Branch, shortSHA(head), err)
+			}
+		} else if detach {
+			if _, err := sgit("checkout", "-q", "--detach", head); err != nil {
+				return "", false, fmt.Errorf("check out the PR head %s in the ticket's clone: %w", shortSHA(head), err)
+			}
+		}
+	}
+	at, err := sgit("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	return head, err == nil && at == head, nil
 }
 
 // shellJoin quotes argv for sh.
