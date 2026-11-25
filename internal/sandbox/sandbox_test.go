@@ -17,7 +17,7 @@ func TestCommandShape(t *testing.T) {
 	}
 	s := strings.Join(got, " ")
 	for _, want := range []string{
-		"/bin/bwrap --unshare-all --share-net --die-with-parent --new-session --proc /proc --dev /dev --tmpfs /tmp",
+		"/bin/bwrap --unshare-all --share-net --die-with-parent --proc /proc --dev /dev --tmpfs /tmp",
 		"--ro-bind /nix/store /nix/store",
 		"--ro-bind /skills /skills",
 		"--ro-bind-try /etc/resolv.conf /etc/resolv.conf",
@@ -26,6 +26,9 @@ func TestCommandShape(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("command lacks %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "--new-session") {
+		t.Error("--new-session takes the agent out of the process group Pause signals")
 	}
 	if strings.Contains(s, "junk") {
 		t.Error("malformed env entry passed through")

@@ -60,10 +60,15 @@ func (c Config) Command(argv, env []string) ([]string, error) {
 		workdir = c.Project
 	}
 
+	// No --new-session: the agent must stay in the process group proc
+	// creates (Setpgid), or Pause's SIGSTOP to that group would reach only
+	// bwrap while the agent keeps running and spending. --new-session
+	// guards against TIOCSTI injection into a controlling terminal; agents
+	// have none (stdio are pipes, the app runs as a systemd service).
 	args := []string{
 		bwrap,
 		"--unshare-all", "--share-net",
-		"--die-with-parent", "--new-session",
+		"--die-with-parent",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
 	}
 	for _, p := range append(append([]string{}, DefaultReadOnly...), c.ReadOnly...) {

@@ -86,9 +86,9 @@ func (g *GitHub) MarkReady(ctx context.Context, repo string, number int) error {
 	return g.C.MarkReady(ctx, repo, number)
 }
 
-// MergePull implements orchestrator.GitHub. It merges only the head the
-// user saw (the current head), so a push racing the tap cannot sneak in.
-func (g *GitHub) MergePull(ctx context.Context, repo string, number int, method string) error {
+// MergePull implements orchestrator.GitHub. It merges only headSHA (the
+// current head when empty), so a push racing the tap cannot sneak in.
+func (g *GitHub) MergePull(ctx context.Context, repo string, number int, method, headSHA string) error {
 	p, err := g.C.GetPull(ctx, repo, number)
 	if err != nil {
 		return err
@@ -102,7 +102,10 @@ func (g *GitHub) MergePull(ctx context.Context, repo string, number int, method 
 			method = string(ms[0])
 		}
 	}
-	_, err = g.C.MergePull(ctx, repo, number, github.MergeMethod(method), p.Head.SHA)
+	if headSHA == "" {
+		headSHA = p.Head.SHA
+	}
+	_, err = g.C.MergePull(ctx, repo, number, github.MergeMethod(method), headSHA)
 	return err
 }
 

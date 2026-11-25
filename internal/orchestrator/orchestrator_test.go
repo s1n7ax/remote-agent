@@ -589,6 +589,8 @@ func TestOnlyUserMerges(t *testing.T) {
 	// The user merges: the ticket ends done/merged and its worktree goes.
 	cur := h.ticket(tk.ID)
 	cur.Status, cur.Stage = domain.StatusInReview, domain.StageCI
+	head, _ := h.gh.Pull(ctx, "", cur.PR)
+	cur.VerifiedSHA = head.HeadSHA // Merge takes only a verified head
 	if err := h.st.UpdateTicket(ctx, &cur); err != nil {
 		t.Fatal(err)
 	}

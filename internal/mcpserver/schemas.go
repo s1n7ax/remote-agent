@@ -188,8 +188,9 @@ const schemaPath = `{
 }`
 
 const descPushBranch = `Push the ticket's goal branch (commit first) to GitHub. Never force-pushes, so
-do not rewrite already-pushed history; the default branch is never pushed. Returns the
-branch and pushed commit.`
+do not rewrite already-pushed history; the default branch is never pushed. A ticket run
+pushes only its own goal branch; a job run any branch except the default one and the
+tickets' ra/<id>-* goal branches. Returns the branch and pushed commit.`
 
 const schemaNone = `{"type": "object", "properties": {}}`
 
