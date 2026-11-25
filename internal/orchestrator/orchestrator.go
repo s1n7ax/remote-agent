@@ -43,11 +43,23 @@ type Options struct {
 	Now func() time.Time
 	// Sandbox wraps a run's command for a project directory and extra
 	// read-only paths; nil runs agents unsandboxed (tests only).
-	Sandbox func(projectDir string, ro []string) func(argv, env []string) ([]string, []string)
+	Sandbox func(projectDir, workdir string, ro []string) func(argv, env []string) ([]string, []string)
+	// Register gives a starting run its MCP bearer token; Revoke ends it.
+	Register func(RunInfo) (token string, err error)
+	Revoke   func(token string)
 	// Tick is the scheduler period (default 5s).
 	Tick time.Duration
 	// CIPoll is how often waiting PRs are polled (default 60s).
 	CIPoll time.Duration
+}
+
+// RunInfo describes a starting run to the MCP server.
+type RunInfo struct {
+	RunID      int64
+	TicketID   int64
+	Stage      domain.Stage
+	Workdir    string
+	ProjectDir string
 }
 
 // Orchestrator is the scheduler and state machine.
@@ -63,7 +75,9 @@ type Orchestrator struct {
 	now      func() time.Time
 	tick     time.Duration
 	ciPoll   time.Duration
-	sandbox  func(projectDir string, ro []string) func(argv, env []string) ([]string, []string)
+	sandbox  func(projectDir, workdir string, ro []string) func(argv, env []string) ([]string, []string)
+	register func(RunInfo) (string, error)
+	revoke   func(string)
 	prev     preview
 
 	kick    chan struct{}
@@ -71,7 +85,7 @@ type Orchestrator struct {
 
 	mu       sync.Mutex
 	active   map[int64]*activeRun // by ticket id
-	byToken  map[string]*activeRun
+	byRun    map[int64]*activeRun
 	draining bool
 	lastCI   map[int64]time.Time
 	wg       sync.WaitGroup
@@ -97,11 +111,11 @@ func New(o Options) *Orchestrator {
 	return &Orchestrator{
 		cfg: o.Config, st: o.Store, gh: o.GitHub, runners: o.Runners, notifier: o.Notifier,
 		skills: o.Skills, bus: o.Bus, log: o.Log, now: o.Now, tick: o.Tick, ciPoll: o.CIPoll,
-		sandbox: o.Sandbox,
+		sandbox: o.Sandbox, register: o.Register, revoke: o.Revoke,
 		kick:    make(chan struct{}, 1),
 		browser: make(chan struct{}, 1),
 		active:  map[int64]*activeRun{},
-		byToken: map[string]*activeRun{},
+		byRun:   map[int64]*activeRun{},
 		lastCI:  map[int64]time.Time{},
 	}
 }

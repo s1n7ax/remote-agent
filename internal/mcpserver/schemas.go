@@ -112,10 +112,11 @@ const schemaMarkdown = `{
 }`
 
 const descSubmitPrototypes = `Record 2–3 prototype options built on separate local branches, so the user
-can pick one. Upload screenshots first with upload_artifact and pass their ids; give
-previewCmd and previewPort together if a live preview should be offered. Then ask the
-user to pick with submit_questions (one single question whose option ids match the
-prototype names).`
+can pick one. Upload screenshots first with upload_artifact and pass their ids as
+artifacts; give preview.command and preview.port so the app can serve the prototype
+live (the command runs from the checkout root, e.g. "cd .ship/<goal>/prototypes/<name>
+&& npm run dev -- --port 5173"). Then ask the user to pick with submit_questions (one
+single question, one option per prototype, option ids equal to the prototype names).`
 
 const schemaSubmitPrototypes = `{
   "type": "object",
@@ -126,14 +127,20 @@ const schemaSubmitPrototypes = `{
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "branch", "summary"],
+        "required": ["name", "branch", "description"],
         "properties": {
-          "name": {"type": "string", "description": "Short unique name, e.g. \"cards\"."},
+          "name": {"type": "string", "description": "Short unique kebab-case name, e.g. \"cards\"."},
           "branch": {"type": "string", "description": "Local branch holding this prototype."},
-          "summary": {"type": "string", "description": "Markdown: what it looks like, trade-offs."},
-          "screenshots": {"type": "array", "items": {"type": "string"}, "description": "Artifact ids."},
-          "previewCmd": {"type": "string", "description": "Command starting a dev server for this prototype."},
-          "previewPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+          "description": {"type": "string", "description": "One line: what sets it apart."},
+          "artifacts": {"type": "array", "items": {"type": "string"}, "description": "Screenshot artifact ids from upload_artifact."},
+          "preview": {
+            "type": "object",
+            "required": ["command", "port"],
+            "properties": {
+              "command": {"type": "string", "description": "Shell command, run from the checkout root, that serves this prototype."},
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+            }
+          }
         }
       }
     }
@@ -205,7 +212,30 @@ const descUpdatePR = `Replace the description (body) of the ticket's pull reques
 const schemaBody = `{
   "type": "object",
   "required": ["body"],
-  "properties": {"body": {"type": "string", "minLength": 1, "description": "Markdown."}}
+  "properties": {
+    "body": {"type": "string", "minLength": 1, "description": "Markdown."},
+    "number": {"type": "integer", "minimum": 1, "description": "Scheduled jobs only: the PR or issue number to act on. Ticket runs omit it."}
+  }
+}`
+
+const schemaNumber = `{
+  "type": "object",
+  "properties": {"number": {"type": "integer", "minimum": 1, "description": "Scheduled jobs only: the PR or issue number to act on. Ticket runs omit it."}}
+}`
+
+const descGetTicket = `The ticket this run works on: title, idea, requirement, decisions, every question
+round with the user's answers, prototypes and the latest proof.`
+
+const descCreateIssue = `Open a GitHub issue in the project (e.g. for a TODO you leave in the code).
+Returns its number and URL.`
+
+const schemaCreateIssue = `{
+  "type": "object",
+  "required": ["title", "body"],
+  "properties": {
+    "title": {"type": "string", "minLength": 1},
+    "body": {"type": "string", "minLength": 1, "description": "Markdown."}
+  }
 }`
 
 const descCIStatus = `CI on the head commit of the ticket's pull request: overall state
@@ -218,7 +248,10 @@ by check name as listed by ci_status.`
 const schemaCILogs = `{
   "type": "object",
   "required": ["check"],
-  "properties": {"check": {"type": "string", "minLength": 1, "description": "Check name from ci_status."}}
+  "properties": {
+    "check": {"type": "string", "minLength": 1, "description": "Check name from ci_status."},
+    "number": {"type": "integer", "minimum": 1, "description": "Scheduled jobs only: the PR or issue number to act on. Ticket runs omit it."}
+  }
 }`
 
 const descGetIssue = `The ticket's GitHub issue: number, title, body (the requirement), state, labels.`

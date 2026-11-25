@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,12 +40,6 @@ type activeRun struct {
 	paused        bool
 	capped        string // reason, when a spend cap ended the run
 	limit         *agent.Limit
-}
-
-func newToken() string {
-	b := make([]byte, 24)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 // usesBrowser reports whether a stage may drive a browser (and so takes the
@@ -140,7 +132,16 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		releaseBrowser()
 		return false, err
 	}
-	ar := &activeRun{run: run, ticket: t, project: p, token: newToken(), workdir: workdir, browser: browser}
+	ar := &activeRun{run: run, ticket: t, project: p, workdir: workdir, browser: browser}
+	if o.register != nil {
+		tok, err := o.register(RunInfo{RunID: run.ID, TicketID: t.ID, Stage: t.Stage, Workdir: workdir, ProjectDir: o.projectDir(p.ID)})
+		if err != nil {
+			releaseBrowser()
+			o.finishRunRecord(ctx, ar, domain.RunFailed, err.Error())
+			return false, fmt.Errorf("register run with the MCP server: %w", err)
+		}
+		ar.token = tok
+	}
 
 	spec, err := o.buildSpec(ctx, ar, kind, account, env)
 	if err != nil {
@@ -152,7 +153,7 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	// Register before starting so the agent's first MCP call finds its run.
 	o.mu.Lock()
 	o.active[t.ID] = ar
-	o.byToken[ar.token] = ar
+	o.byRun[run.ID] = ar
 	o.mu.Unlock()
 
 	sess, err := runner.Start(ctx, spec)
@@ -164,8 +165,8 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	}
 	ar.sess = sess
 
-	started := o.now()
-	ar.run.StartedAt = &started
+	startedAt := o.now()
+	ar.run.StartedAt = &startedAt
 	_ = o.st.UpdateRun(ctx, ar.run)
 	t.Status = domain.StatusWorking
 	t.StatusNote = ""
@@ -187,8 +188,11 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 func (o *Orchestrator) unregister(ar *activeRun) {
 	o.mu.Lock()
 	delete(o.active, ar.ticket.ID)
-	delete(o.byToken, ar.token)
+	delete(o.byRun, ar.run.ID)
 	o.mu.Unlock()
+	if o.revoke != nil && ar.token != "" {
+		o.revoke(ar.token)
+	}
 }
 
 // buildSpec prepares config dirs, MCP config and the prompt.
@@ -300,7 +304,7 @@ func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain
 		if skillsDir != "" {
 			ro = append(ro, skillsDir)
 		}
-		spec.Wrap = o.sandbox(o.projectDir(ar.project.ID), ro)
+		spec.Wrap = o.sandbox(o.projectDir(ar.project.ID), ar.workdir, ro)
 	}
 	return spec, nil
 }
@@ -395,11 +399,8 @@ func (o *Orchestrator) SendMessage(ctx context.Context, ticketID int64, text str
 	if ar == nil {
 		return ErrNotActive
 	}
-	if err := ar.sess.Send(ctx, text); err != nil {
-		return err
-	}
-	o.event(ctx, ar, domain.EventUser, text)
-	return nil
+	// The session logs the message as an EventUser line.
+	return ar.sess.Send(ctx, text)
 }
 
 // Pause freezes a ticket's run (SIGSTOP on its process group): no tokens are
@@ -463,11 +464,4 @@ func (o *Orchestrator) activeFor(ticketID int64) *activeRun {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.active[ticketID]
-}
-
-// RunForToken returns the active run an MCP bearer token belongs to.
-func (o *Orchestrator) runForToken(token string) *activeRun {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.byToken[token]
 }

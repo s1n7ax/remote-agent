@@ -91,8 +91,8 @@ func (o *Orchestrator) StartPrototypePreview(ctx context.Context, ticketID int64
 }
 
 // ToolStartPreview starts a preview for the run's ticket.
-func (o *Orchestrator) ToolStartPreview(ctx context.Context, token, branch, command string, port int) (*PreviewInfo, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolStartPreview(ctx context.Context, runID int64, branch, command string, port int) (*PreviewInfo, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (o *Orchestrator) startPreview(ctx context.Context, ticketID int64, branch,
 	argv := []string{"bash", "-lc", command}
 	env := []string{"PATH=" + o.cfg.SandboxPATH, "HOME=" + o.homeDir(t.ProjectID), fmt.Sprintf("PORT=%d", port)}
 	if o.sandbox != nil {
-		argv, env = o.sandbox(o.projectDir(t.ProjectID), nil)(argv, env)
+		argv, env = o.sandbox(o.projectDir(t.ProjectID), dir, nil)(argv, env)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir

@@ -18,16 +18,19 @@ import (
 	"github.com/s1n7ax/remote-agent/internal/questions"
 )
 
-// The methods in this file back the app MCP tools. Each is scoped to the run
-// that owns the bearer token, so an agent can only touch its own ticket.
+// The methods in this file back the app MCP tools. Each is scoped to one
+// active run (the MCP server maps the run's bearer token to its id), so an
+// agent can only touch its own ticket.
 
-// ErrUnknownToken is returned for a token no active run holds.
-var ErrUnknownToken = errors.New("unknown or expired run token")
+// ErrUnknownRun is returned for a run that is not active.
+var ErrUnknownRun = errors.New("unknown or finished run")
 
-func (o *Orchestrator) tokenRun(token string) (*activeRun, error) {
-	ar := o.runForToken(token)
+func (o *Orchestrator) runByID(runID int64) (*activeRun, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	ar := o.byRun[runID]
 	if ar == nil {
-		return nil, ErrUnknownToken
+		return nil, ErrUnknownRun
 	}
 	return ar, nil
 }
@@ -53,8 +56,8 @@ type TicketContext struct {
 }
 
 // ToolTicket returns the run's ticket, its rounds (with answers) and proof.
-func (o *Orchestrator) ToolTicket(ctx context.Context, token string) (TicketContext, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolTicket(ctx context.Context, runID int64) (TicketContext, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return TicketContext{}, err
 	}
@@ -87,8 +90,8 @@ func (o *Orchestrator) ticketContext(ctx context.Context, id int64) (TicketConte
 }
 
 // ToolSubmitQuestions posts a question round on the run's ticket.
-func (o *Orchestrator) ToolSubmitQuestions(ctx context.Context, token string, tree domain.QuestionTree, purpose domain.Purpose) (int, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolSubmitQuestions(ctx context.Context, runID int64, tree domain.QuestionTree, purpose domain.Purpose) (int, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return 0, err
 	}
@@ -134,8 +137,8 @@ func (o *Orchestrator) ToolSubmitQuestions(ctx context.Context, token string, tr
 }
 
 // ToolSubmitRequirement stores the requirement and mirrors it on the issue.
-func (o *Orchestrator) ToolSubmitRequirement(ctx context.Context, token, markdown string) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolSubmitRequirement(ctx context.Context, runID int64, markdown string) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -176,8 +179,8 @@ func quote(s string) string {
 }
 
 // ToolSubmitDecisions stores the decisions record.
-func (o *Orchestrator) ToolSubmitDecisions(ctx context.Context, token, markdown string) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolSubmitDecisions(ctx context.Context, runID int64, markdown string) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -190,8 +193,8 @@ func (o *Orchestrator) ToolSubmitDecisions(ctx context.Context, token, markdown 
 }
 
 // ToolSubmitPrototypes stores the prototypes the user will pick from.
-func (o *Orchestrator) ToolSubmitPrototypes(ctx context.Context, token string, ps []domain.Prototype) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolSubmitPrototypes(ctx context.Context, runID int64, ps []domain.Prototype) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -212,8 +215,8 @@ func (o *Orchestrator) ToolSubmitPrototypes(ctx context.Context, token string, p
 
 // ToolUploadArtifact stores a file from the run's project directory and
 // returns its artifact id.
-func (o *Orchestrator) ToolUploadArtifact(ctx context.Context, token, path string) (string, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolUploadArtifact(ctx context.Context, runID int64, path string) (string, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return "", err
 	}
@@ -272,8 +275,8 @@ func (o *Orchestrator) ArtifactPath(id string) string {
 }
 
 // ToolSubmitProof stores the verify stage's evidence and posts it on the PR.
-func (o *Orchestrator) ToolSubmitProof(ctx context.Context, token, verdict, report string, files []string) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolSubmitProof(ctx context.Context, runID int64, verdict, report string, files []string) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -319,8 +322,8 @@ func currentBranch(ctx context.Context, dir string) (string, error) {
 
 // ToolPushBranch pushes the branch checked out in the run's workdir. The
 // GitHub layer refuses the default branch.
-func (o *Orchestrator) ToolPushBranch(ctx context.Context, token string) (string, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return "", err
 	}
@@ -343,12 +346,12 @@ func (o *Orchestrator) ToolPushBranch(ctx context.Context, token string) (string
 
 // ToolOpenPR opens the ticket's PR (pushing first), or updates it when one
 // exists. The body always closes the ticket's issue.
-func (o *Orchestrator) ToolOpenPR(ctx context.Context, token, title, body string, draft bool) (PullState, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolOpenPR(ctx context.Context, runID int64, title, body string, draft bool) (PullState, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return PullState{}, err
 	}
-	branch, err := o.ToolPushBranch(ctx, token)
+	branch, err := o.ToolPushBranch(ctx, runID)
 	if err != nil {
 		return PullState{}, err
 	}
@@ -383,8 +386,8 @@ func (o *Orchestrator) ToolOpenPR(ctx context.Context, token, title, body string
 }
 
 // ToolUpdatePR replaces the PR description.
-func (o *Orchestrator) ToolUpdatePR(ctx context.Context, token, body string) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolUpdatePR(ctx context.Context, runID int64, body string) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -402,8 +405,8 @@ func (o *Orchestrator) ToolUpdatePR(ctx context.Context, token, body string) err
 }
 
 // ToolCIStatus returns the ticket's PR state and checks (or PR n for jobs).
-func (o *Orchestrator) ToolCIStatus(ctx context.Context, token string, number int) (PullState, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolCIStatus(ctx context.Context, runID int64, number int) (PullState, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return PullState{}, err
 	}
@@ -417,12 +420,15 @@ func (o *Orchestrator) ToolCIStatus(ctx context.Context, token string, number in
 }
 
 // ToolCILogs returns the log tail of a failed check on the ticket's PR (or PR n).
-func (o *Orchestrator) ToolCILogs(ctx context.Context, token, check string, number int) (string, error) {
-	pr, err := o.ToolCIStatus(ctx, token, number)
+func (o *Orchestrator) ToolCILogs(ctx context.Context, runID int64, check string, number int) (string, error) {
+	pr, err := o.ToolCIStatus(ctx, runID, number)
 	if err != nil {
 		return "", err
 	}
-	ar, _ := o.tokenRun(token)
+	ar, err := o.runByID(runID)
+	if err != nil {
+		return "", err
+	}
 	var out strings.Builder
 	for _, c := range pr.Checks {
 		if check != "" && c.Name != check {
@@ -444,8 +450,8 @@ func (o *Orchestrator) ToolCILogs(ctx context.Context, token, check string, numb
 }
 
 // ToolListPulls lists the project's open PRs (for scheduled jobs).
-func (o *Orchestrator) ToolListPulls(ctx context.Context, token string) ([]PullState, error) {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolListPulls(ctx context.Context, runID int64) ([]PullState, error) {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return nil, err
 	}
@@ -453,8 +459,8 @@ func (o *Orchestrator) ToolListPulls(ctx context.Context, token string) ([]PullS
 }
 
 // ToolComment posts a comment on the ticket's issue (or PR n for jobs).
-func (o *Orchestrator) ToolComment(ctx context.Context, token, body string, number int) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolComment(ctx context.Context, runID int64, body string, number int) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -468,8 +474,8 @@ func (o *Orchestrator) ToolComment(ctx context.Context, token, body string, numb
 }
 
 // ToolStageDone records the run's summary; the run should exit after it.
-func (o *Orchestrator) ToolStageDone(ctx context.Context, token, summary string) error {
-	ar, err := o.tokenRun(token)
+func (o *Orchestrator) ToolStageDone(ctx context.Context, runID int64, summary string) error {
+	ar, err := o.runByID(runID)
 	if err != nil {
 		return err
 	}
@@ -479,4 +485,13 @@ func (o *Orchestrator) ToolStageDone(ctx context.Context, token, summary string)
 	ar.mu.Unlock()
 	o.event(ctx, ar, domain.EventSystem, "stage done: "+summary)
 	return nil
+}
+
+// ToolRepo returns the run's project repository (owner/name).
+func (o *Orchestrator) ToolRepo(runID int64) (string, error) {
+	ar, err := o.runByID(runID)
+	if err != nil {
+		return "", err
+	}
+	return ar.project.Repo, nil
 }

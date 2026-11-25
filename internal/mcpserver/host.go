@@ -75,18 +75,22 @@ type Host interface {
 	// OpenPR opens the ticket's pull request from its goal branch.
 	OpenPR(ctx context.Context, run Run, pr NewPR) (github.Pull, error)
 	// UpdatePR replaces the ticket's pull request description.
-	UpdatePR(ctx context.Context, run Run, body string) (github.Pull, error)
+	UpdatePR(ctx context.Context, run Run, number int, body string) (github.Pull, error)
 	// CIStatus reports CI on the head of the ticket's pull request.
-	CIStatus(ctx context.Context, run Run) (github.Checks, error)
+	CIStatus(ctx context.Context, run Run, number int) (github.Checks, error)
 	// CILogs returns the failure log of the named check on that head.
-	CILogs(ctx context.Context, run Run, check string) (string, error)
+	CILogs(ctx context.Context, run Run, number int, check string) (string, error)
 	// GetIssue returns the ticket's GitHub issue.
-	GetIssue(ctx context.Context, run Run) (github.Issue, error)
+	GetIssue(ctx context.Context, run Run, number int) (github.Issue, error)
 	// Comment posts on the ticket's pull request, or its issue when there is
 	// no pull request yet.
-	Comment(ctx context.Context, run Run, body string) (github.Comment, error)
+	Comment(ctx context.Context, run Run, number int, body string) (github.Comment, error)
 	// ListPulls lists the project's open pull requests.
 	ListPulls(ctx context.Context, run Run) ([]github.Pull, error)
+	// GetTicket returns the run's ticket with its rounds, answers and proof.
+	GetTicket(ctx context.Context, run Run) (any, error)
+	// CreateIssue opens an issue in the project.
+	CreateIssue(ctx context.Context, run Run, title, body string) (github.Issue, error)
 	// StageDone ends the run's stage with a summary.
 	StageDone(ctx context.Context, run Run, summary string) error
 }

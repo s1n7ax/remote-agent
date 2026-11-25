@@ -86,23 +86,29 @@ func (h *fakeHost) PushBranch(_ context.Context, r Run) (Pushed, error) {
 func (h *fakeHost) OpenPR(_ context.Context, r Run, pr NewPR) (github.Pull, error) {
 	return github.Pull{Number: 5, Draft: pr.Draft}, h.record(r, ToolOpenPR, pr)
 }
-func (h *fakeHost) UpdatePR(_ context.Context, r Run, body string) (github.Pull, error) {
+func (h *fakeHost) UpdatePR(_ context.Context, r Run, _ int, body string) (github.Pull, error) {
 	return github.Pull{Number: 5, Body: body}, h.record(r, ToolUpdatePR, body)
 }
-func (h *fakeHost) CIStatus(_ context.Context, r Run) (github.Checks, error) {
+func (h *fakeHost) CIStatus(_ context.Context, r Run, _ int) (github.Checks, error) {
 	return github.Checks{State: github.CheckFailure, Checks: []github.Check{{Name: "test"}}}, h.record(r, ToolCIStatus, nil)
 }
-func (h *fakeHost) CILogs(_ context.Context, r Run, check string) (string, error) {
+func (h *fakeHost) CILogs(_ context.Context, r Run, _ int, check string) (string, error) {
 	return "--- FAIL: TestX", h.record(r, ToolCILogs, check)
 }
-func (h *fakeHost) GetIssue(_ context.Context, r Run) (github.Issue, error) {
+func (h *fakeHost) GetIssue(_ context.Context, r Run, _ int) (github.Issue, error) {
 	return github.Issue{Number: 3, Title: "Idea"}, h.record(r, ToolGetIssue, nil)
 }
-func (h *fakeHost) Comment(_ context.Context, r Run, body string) (github.Comment, error) {
+func (h *fakeHost) Comment(_ context.Context, r Run, _ int, body string) (github.Comment, error) {
 	return github.Comment{ID: 9, Body: body}, h.record(r, ToolComment, body)
 }
 func (h *fakeHost) ListPulls(_ context.Context, r Run) ([]github.Pull, error) {
 	return []github.Pull{{Number: 5}}, h.record(r, ToolListPulls, nil)
+}
+func (h *fakeHost) GetTicket(_ context.Context, r Run) (any, error) {
+	return map[string]any{"id": r.TicketID}, h.record(r, ToolGetTicket, nil)
+}
+func (h *fakeHost) CreateIssue(_ context.Context, r Run, title, body string) (github.Issue, error) {
+	return github.Issue{Number: 9, Title: title}, h.record(r, ToolCreateIssue, title)
 }
 func (h *fakeHost) StageDone(_ context.Context, r Run, summary string) error {
 	return h.record(r, ToolStageDone, summary)
@@ -430,13 +436,13 @@ func TestOtherTools(t *testing.T) {
 	}
 
 	ps := []any{
-		map[string]any{"name": "cards", "branch": "proto/cards", "summary": "cards", "screenshots": []any{"a1"}},
-		map[string]any{"name": "list", "branch": "proto/list", "summary": "list", "previewCmd": "npm run dev", "previewPort": 3000},
+		map[string]any{"name": "cards", "branch": "proto/cards", "description": "cards", "artifacts": []any{"a1"}},
+		map[string]any{"name": "list", "branch": "proto/list", "description": "list", "preview": map[string]any{"command": "npm run dev", "port": 3000}},
 	}
 	if text, isErr := callTool(t, cs, ToolSubmitPrototypes, map[string]any{"prototypes": ps}); isErr {
 		t.Fatalf("submit_prototypes: %s", text)
 	}
-	if got := e.host.last(t).arg.([]domain.Prototype); len(got) != 2 || got[1].PreviewPort != 3000 {
+	if got := e.host.last(t).arg.([]domain.Prototype); len(got) != 2 || got[1].Preview == nil || got[1].Preview.Port != 3000 {
 		t.Errorf("prototypes = %+v", got)
 	}
 

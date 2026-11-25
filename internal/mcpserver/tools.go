@@ -31,6 +31,8 @@ const (
 	ToolComment           = "comment"
 	ToolListPulls         = "list_pulls"
 	ToolStageDone         = "stage_done"
+	ToolGetTicket         = "get_ticket"
+	ToolCreateIssue       = "create_issue"
 )
 
 // ToolNames lists every tool. There is no merge tool.
@@ -38,7 +40,7 @@ var ToolNames = []string{
 	ToolSubmitQuestions, ToolSubmitRequirement, ToolSubmitDecisions, ToolSubmitPrototypes,
 	ToolStartPreview, ToolSubmitProof, ToolUploadArtifact, ToolPushBranch, ToolOpenPR,
 	ToolUpdatePR, ToolCIStatus, ToolCILogs, ToolGetIssue, ToolComment, ToolListPulls,
-	ToolStageDone,
+	ToolGetTicket, ToolCreateIssue, ToolStageDone,
 }
 
 // tools binds the tool handlers to one run.
@@ -111,10 +113,19 @@ type (
 		Draft *bool  `json:"draft"`
 	}
 	bodyIn struct {
-		Body string `json:"body"`
+		Body   string `json:"body"`
+		Number int    `json:"number"`
 	}
 	checkIn struct {
-		Check string `json:"check"`
+		Check  string `json:"check"`
+		Number int    `json:"number"`
+	}
+	numberIn struct {
+		Number int `json:"number"`
+	}
+	issueIn struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
 	}
 	summaryIn struct {
 		Summary string `json:"summary"`
@@ -190,28 +201,37 @@ func (t *tools) defs() []toolDef {
 			if err := required("body", in.Body); err != nil {
 				return nil, err
 			}
-			return t.host.UpdatePR(ctx, t.run, in.Body)
+			return t.host.UpdatePR(ctx, t.run, in.Number, in.Body)
 		}),
-		define(ToolCIStatus, descCIStatus, schemaNone, true, func(ctx context.Context, _ noIn) (any, error) {
-			return t.host.CIStatus(ctx, t.run)
+		define(ToolCIStatus, descCIStatus, schemaNumber, true, func(ctx context.Context, in numberIn) (any, error) {
+			return t.host.CIStatus(ctx, t.run, in.Number)
 		}),
 		define(ToolCILogs, descCILogs, schemaCILogs, true, func(ctx context.Context, in checkIn) (any, error) {
 			if err := required("check", in.Check); err != nil {
 				return nil, err
 			}
-			return t.host.CILogs(ctx, t.run, in.Check)
+			return t.host.CILogs(ctx, t.run, in.Number, in.Check)
 		}),
-		define(ToolGetIssue, descGetIssue, schemaNone, true, func(ctx context.Context, _ noIn) (any, error) {
-			return t.host.GetIssue(ctx, t.run)
+		define(ToolGetIssue, descGetIssue, schemaNumber, true, func(ctx context.Context, in numberIn) (any, error) {
+			return t.host.GetIssue(ctx, t.run, in.Number)
 		}),
 		define(ToolComment, descComment, schemaBody, false, func(ctx context.Context, in bodyIn) (any, error) {
 			if err := required("body", in.Body); err != nil {
 				return nil, err
 			}
-			return t.host.Comment(ctx, t.run, in.Body)
+			return t.host.Comment(ctx, t.run, in.Number, in.Body)
 		}),
 		define(ToolListPulls, descListPulls, schemaNone, true, func(ctx context.Context, _ noIn) (any, error) {
 			return t.host.ListPulls(ctx, t.run)
+		}),
+		define(ToolGetTicket, descGetTicket, schemaNone, true, func(ctx context.Context, _ noIn) (any, error) {
+			return t.host.GetTicket(ctx, t.run)
+		}),
+		define(ToolCreateIssue, descCreateIssue, schemaCreateIssue, false, func(ctx context.Context, in issueIn) (any, error) {
+			if err := errors.Join(required("title", in.Title), required("body", in.Body)); err != nil {
+				return nil, err
+			}
+			return t.host.CreateIssue(ctx, t.run, in.Title, in.Body)
 		}),
 		define(ToolStageDone, descStageDone, schemaStageDone, false, func(ctx context.Context, in summaryIn) (any, error) {
 			if err := required("summary", in.Summary); err != nil {
@@ -262,11 +282,11 @@ func (t *tools) submitPrototypes(ctx context.Context, in prototypesIn) (any, err
 		if strings.TrimSpace(p.Branch) == "" {
 			errs = append(errs, fmt.Errorf("prototypes[%d]: branch is required", i))
 		}
-		if strings.TrimSpace(p.Summary) == "" {
-			errs = append(errs, fmt.Errorf("prototypes[%d]: summary is required", i))
+		if strings.TrimSpace(p.Description) == "" {
+			errs = append(errs, fmt.Errorf("prototypes[%d]: description is required", i))
 		}
-		if p.PreviewPort < 0 || p.PreviewPort > 65535 || (p.PreviewCmd != "") != (p.PreviewPort != 0) {
-			errs = append(errs, fmt.Errorf("prototypes[%d]: previewCmd and previewPort go together", i))
+		if pv := p.Preview; pv != nil && (pv.Port <= 0 || pv.Port > 65535 || strings.TrimSpace(pv.Command) == "") {
+			errs = append(errs, fmt.Errorf("prototypes[%d]: preview needs a command and a port", i))
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
