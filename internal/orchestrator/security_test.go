@@ -330,8 +330,14 @@ func TestMigrateLayoutMovesOldProjectDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	projects := h.cfg.Path("projects")
-	writeFile(t, filepath.Join(projects, "7", "repo", ".git", "hooks", "post-checkout"), "evil")
+	// The harness's Run migrates concurrently: build the old directory
+	// elsewhere and move it in whole, so either migration finds it complete.
+	staged := h.cfg.Path("staged-7")
+	writeFile(t, filepath.Join(staged, "repo", ".git", "hooks", "post-checkout"), "evil")
 	writeFile(t, filepath.Join(projects, "notes", "x"), "kept")
+	if err := os.Rename(staged, filepath.Join(projects, "7")); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.o.migrateLayout(h.ctx); err != nil {
 		t.Fatal(err)
 	}
