@@ -521,6 +521,8 @@ func (s *Server) merge(w http.ResponseWriter, r *http.Request) error {
 	}
 	var in struct {
 		Method string `json:"method"`
+		// SHA is the head the user reviewed; a newer push makes the merge fail.
+		SHA string `json:"sha"`
 	}
 	if r.ContentLength != 0 {
 		if err := decode(r, &in); err != nil {
@@ -530,7 +532,7 @@ func (s *Server) merge(w http.ResponseWriter, r *http.Request) error {
 	if in.Method != "" && in.Method != "merge" && in.Method != "squash" && in.Method != "rebase" {
 		return badRequest("method must be merge, squash or rebase")
 	}
-	if err := s.Orch.Merge(r.Context(), id, n, in.Method); err != nil {
+	if err := s.Orch.MergeAt(r.Context(), id, n, in.Method, in.SHA); err != nil {
 		return err
 	}
 	return ok(w, map[string]bool{"merged": true})

@@ -35,7 +35,7 @@
 
   async function merge() {
     merging = true;
-    const res = await app.attempt(() => api.merge(projectId, pr.number));
+    const res = await app.attempt(() => api.merge(projectId, pr.number, pr.headSha));
     merging = false;
     if (!res) return;
     confirming = false;

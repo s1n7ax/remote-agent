@@ -139,7 +139,8 @@ export const api = {
   // github
   github: (projectId: number) => call<GitHubView>('GET', `/api/projects/${projectId}/github`),
   /** Merges with the repository's default method. */
-  merge: (projectId: number, pr: number) => call<Done<'merged'>>('POST', `/api/projects/${projectId}/pulls/${pr}/merge`, {}),
+  merge: (projectId: number, pr: number, sha?: string) =>
+    call<Done<'merged'>>('POST', `/api/projects/${projectId}/pulls/${pr}/merge`, sha ? { sha } : {}),
 
   // schedules
   schedules: (projectId: number) => call<Schedule[]>('GET', `/api/projects/${projectId}/schedules`),
