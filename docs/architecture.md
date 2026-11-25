@@ -59,6 +59,8 @@ Stages, in order (a stage may post an extra round, which sends the ticket to `ne
 
 Starting: `backlog` → `ready(explore)` by the Start button or a ticket schedule (`startAt`). Answering the last visible question of a round moves `needs_input` → `ready` with no click.
 
+Links (`ticket_links`, set only by the user): a ticket may **depend on** other tickets of its project and be **related** to them. A `ready` ticket with a dependency that is not `done` (merged) is held: the scheduler skips it without taking a run slot and sets its note to "waiting on #A …" (saying why when A failed, was deleted or had its PR closed). The first pass after its last dependency is done starts it. A dependency added after the ticket's branch was cut makes its next run merge the base branch first (`update from base` in the first message). Runs get their dependencies and related tickets under `## Linked tickets`, with each one's requirement in `.ship/<goal>/links/<id>.md`; each linked issue carries one comment listing the links. Loops, self-links, other projects and jobs are refused.
+
 Jobs (scheduled per project, cron) create a ticket of `kind: job` that goes straight to `ready(job)`, runs its prompt once, and ends `done`.
 
 ## Question tree
@@ -99,6 +101,7 @@ An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when
 | `POST /api/tickets/{id}/start`                 | backlog → ready                                       |
 | `PUT /api/tickets/{id}/rounds/{n}/answers/{qid}` | save one answer; response says whether round completed |
 | `POST /api/tickets/{id}/message`               | send a message to the active run                      |
+| `POST /api/tickets/{id}/links` / `DELETE …/links/{lid}` | add (`{to, kind: depends_on\|blocks\|related}`) or remove a link; returns the ticket's links |
 | `POST /api/tickets/{id}/pause` / `resume` / `stop` / `retry` | run control                     |
 | `GET /api/tickets/{id}/runs/{runId}/events`    | run log (paged)                                       |
 | `GET /api/projects/{id}/github`                | issues, PRs, CI status                                |
