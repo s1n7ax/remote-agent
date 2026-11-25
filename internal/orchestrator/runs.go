@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -201,19 +203,28 @@ func (o *Orchestrator) unregister(ar *activeRun) {
 	}
 }
 
-// buildSpec prepares config dirs, MCP config and the prompt.
+// buildSpec prepares config dirs, MCP config and the prompt. home/ is
+// agent-writable (and shared by the project's concurrent runs), so every
+// file operation there goes through an os.Root at home/: a planted symlink
+// cannot make the app delete, write or read outside it.
 func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain.AgentKind, acc domain.Account, env map[string]string) (agent.Spec, error) {
 	home := o.homeDir(ar.project.ID)
-	var cfgDir string
+	hroot, err := os.OpenRoot(home)
+	if err != nil {
+		return agent.Spec{}, fmt.Errorf("open home: %w", err)
+	}
+	defer hroot.Close()
+	var cfgRel string
 	switch kind {
 	case domain.AgentClaude:
-		cfgDir = filepath.Join(home, ".claude-accounts", fmt.Sprint(acc.ID))
+		cfgRel = filepath.Join(".claude-accounts", fmt.Sprint(acc.ID))
 	case domain.AgentPi:
-		cfgDir = filepath.Join(home, ".pi", "agent")
+		cfgRel = filepath.Join(".pi", "agent")
 	default:
-		cfgDir = filepath.Join(home, ".fake")
+		cfgRel = ".fake"
 	}
-	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+	cfgDir := filepath.Join(home, cfgRel)
+	if err := ensureDir(hroot, cfgRel); err != nil {
 		return agent.Spec{}, fmt.Errorf("create config dir: %w", err)
 	}
 
@@ -225,15 +236,15 @@ func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain
 		}
 		skillsDir = dir
 		links := map[string]string{
-			filepath.Join(cfgDir, "skills"):               dir,
-			filepath.Join(cfgDir, "agents"):               filepath.Join(dir, "agents"),
-			filepath.Join(home, ".agents", "skills"):      dir,
-			filepath.Join(home, ".claude", "skills"):      dir,
-			filepath.Join(home, ".claude", "agents"):      filepath.Join(dir, "agents"),
-			filepath.Join(home, ".pi", "agent", "agents"): filepath.Join(dir, "agents"),
+			filepath.Join(cfgRel, "skills"):         dir,
+			filepath.Join(cfgRel, "agents"):         filepath.Join(dir, "agents"),
+			filepath.Join(".agents", "skills"):      dir,
+			filepath.Join(".claude", "skills"):      dir,
+			filepath.Join(".claude", "agents"):      filepath.Join(dir, "agents"),
+			filepath.Join(".pi", "agent", "agents"): filepath.Join(dir, "agents"),
 		}
 		for link, target := range links {
-			if err := relink(link, target); err != nil {
+			if err := relink(hroot, link, target); err != nil {
 				return agent.Spec{}, err
 			}
 		}
@@ -271,7 +282,7 @@ func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain
 		return agent.Spec{}, err
 	}
 	mcpPath := filepath.Join(cfgDir, "mcp.json")
-	if err := os.WriteFile(mcpPath, mcpJSON, 0o600); err != nil {
+	if err := writeNew(hroot, filepath.Join(cfgRel, "mcp.json"), mcpJSON); err != nil {
 		return agent.Spec{}, fmt.Errorf("write mcp config: %w", err)
 	}
 
@@ -302,7 +313,7 @@ func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain
 		Prompt: prompt, SystemPrompt: system,
 		Workdir: ar.workdir, Home: home, ConfigDir: cfgDir, MCPConfig: mcpPath, Env: env,
 	}
-	if resume := o.resumeSession(ctx, ar, cfgDir); resume != "" {
+	if resume := o.resumeSession(ctx, ar, hroot, cfgRel); resume != "" {
 		spec.Resume = resume
 	}
 	if o.sandbox != nil {
@@ -310,7 +321,9 @@ func (o *Orchestrator) buildSpec(ctx context.Context, ar *activeRun, kind domain
 		if skillsDir != "" {
 			ro = append(ro, skillsDir)
 		}
-		spec.Wrap = o.sandbox(o.projectDir(ar.project.ID), ar.workdir, ro)
+		// Read-write: the ticket's own clone and $HOME only; not repo/, not
+		// other tickets' clones.
+		spec.Wrap = o.sandbox([]string{ar.workdir, home}, ro, ar.workdir)
 	}
 	return spec, nil
 }
@@ -324,19 +337,71 @@ func contains(xs []string, x string) bool {
 	return false
 }
 
-// relink points link at target, replacing whatever was there.
-func relink(link, target string) error {
-	if cur, err := os.Readlink(link); err == nil && cur == target {
+// relink points link (relative to root) at target, replacing whatever was
+// there.
+func relink(root *os.Root, link, target string) error {
+	if cur, err := root.Readlink(link); err == nil && cur == target {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+	if err := ensureDir(root, filepath.Dir(link)); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(link), err)
 	}
-	_ = os.RemoveAll(link)
-	if err := os.Symlink(target, link); err != nil {
+	// RemoveAll unlinks a symlink, never its target.
+	if err := root.RemoveAll(link); err != nil {
+		return fmt.Errorf("replace %s: %w", link, err)
+	}
+	if err := root.Symlink(target, link); err != nil {
 		return fmt.Errorf("link %s: %w", link, err)
 	}
 	return nil
+}
+
+// ensureDir makes every component of rel under root a real directory,
+// replacing a symlink or file the agent put in its place.
+func ensureDir(root *os.Root, rel string) error {
+	if rel == "." || rel == "" {
+		return nil
+	}
+	p := ""
+	for _, c := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+		p = filepath.Join(p, c)
+		fi, err := root.Lstat(p)
+		if err == nil && fi.IsDir() {
+			continue
+		}
+		if err == nil {
+			if err := root.RemoveAll(p); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := root.Mkdir(p, 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeNew replaces rel under root with a new file holding data: whatever
+// was there (a symlink included) is removed, and the file is created
+// exclusively so a link planted meanwhile is not followed.
+func writeNew(root *os.Root, rel string, data []byte) error {
+	if err := ensureDir(root, filepath.Dir(rel)); err != nil {
+		return err
+	}
+	if err := root.RemoveAll(rel); err != nil {
+		return err
+	}
+	f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // watch consumes a session's events until it ends, then settles the ticket.
@@ -372,6 +437,12 @@ func (o *Orchestrator) watch(ctx context.Context, ar *activeRun) {
 	}
 	o.unregister(ar)
 	o.settle(ctx, ar, final)
+	if ar.ticket.Kind == domain.KindJob {
+		// Every job firing gets a fresh clone; drop it once the job ended.
+		if t, err := o.st.Ticket(ctx, ar.ticket.ID); err == nil && (t.Status == domain.StatusDone || t.Status == domain.StatusFailed) {
+			o.removeWorkspace(ctx, t)
+		}
+	}
 	o.Kick()
 }
 

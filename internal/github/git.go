@@ -21,7 +21,10 @@ var ErrPushRefused = errors.New("push refused")
 // an HTTP header set through GIT_CONFIG_* environment variables for one git
 // process: it is never written to a config file, a remote URL, or argv.
 // Every command talks to an explicit URL under BaseURL, never to a remote
-// named in the (agent-writable) repository config.
+// named in the repository config. The clones it runs in are the app's own
+// (never bound into a sandbox); checkConfig is defence in depth, not the
+// boundary: it cannot stop a concurrent writer, so agent-writable clones
+// must never be passed here.
 type Git struct {
 	// Bin is the git executable; empty means "git" on PATH.
 	Bin string
@@ -68,7 +71,7 @@ func (g *Git) Fetch(ctx context.Context, repo, dir string) error {
 	if err := g.checkConfig(ctx, dir); err != nil {
 		return fmt.Errorf("fetch %s: %w", repo, err)
 	}
-	if _, err := g.run(ctx, dir, "fetch", "--prune", "--no-tags", "--", remote,
+	if _, err := g.run(ctx, dir, "fetch", "--prune", "--no-tags", "--no-recurse-submodules", "--", remote,
 		"+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return fmt.Errorf("fetch %s: %w", repo, err)
 	}
@@ -148,8 +151,9 @@ func (g *Git) checkBranch(ctx context.Context, branch string) error {
 var riskyConfig = []string{
 	"http.", "https.", "url.", "credential", "include.", "includeif.",
 	"core.hookspath", "core.fsmonitor", "core.sshcommand", "core.gitproxy",
-	"core.askpass", "protocol.", "remote.", "pushurl", "transfer.", "uploadpack.",
-	"receivepack.", "gpg.", "push.",
+	"core.askpass", "core.alternaterefscommand", "protocol.", "remote.", "pushurl",
+	"transfer.", "uploadpack.", "receivepack.", "gpg.", "push.", "submodule.",
+	"fetch.recursesubmodules",
 }
 
 // checkConfig refuses a repository whose local or worktree config sets
@@ -178,19 +182,27 @@ func (g *Git) checkConfig(ctx context.Context, dir string) error {
 }
 
 // run executes git (in dir when non-empty) with the token header scoped to
-// BaseURL and hooks disabled, returning stdout. The token is redacted from
-// errors.
+// BaseURL, hooks, fsmonitor and submodules disabled and no system or global
+// config (so no filter, credential helper or proxy from them), returning
+// stdout. The token is redacted from errors.
 func (g *Git) run(ctx context.Context, dir string, args ...string) (string, error) {
 	bin := g.Bin
 	if bin == "" {
 		bin = "git"
 	}
-	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
+	full := append([]string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false",
+		"-c", "submodule.recurse=false"}, args...)
 	if dir != "" {
 		full = append([]string{"-C", dir}, full...)
 	}
 	cmd := exec.CommandContext(ctx, bin, full...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=")
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_ATTR_NOSYSTEM=1")
 	if g.Token != "" {
 		cred := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + g.Token))
 		cmd.Env = append(cmd.Env,

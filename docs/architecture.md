@@ -112,6 +112,26 @@ An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when
 | `GET /healthz`                                 | health check (DB reachable, orchestrator alive)       |
 | `GET /api/idle`, `POST /api/drain`             | used by the auto-deploy timer                          |
 
+## Workspaces and the sandbox boundary
+
+The app runs as the same uid as the agents, outside their sandboxes, and holds the GitHub token and the database. It must stay safe when an agent is fully malicious inside its sandbox, so everything a sandbox can write is treated as hostile.
+
+```
+<dataDir>/projects/<id>/
+  repo/            the app's clone of GitHub. No sandbox ever sees it; the only clone git runs in with the token.
+  work/<ticket>/   the ticket's (or job's) own clone of repo/: objects copied, no hardlinks, no alternates;
+                   origin = the GitHub URL without credentials
+  home/            the sandbox $HOME: Claude/Pi config dirs, skill symlinks, mcp.json
+```
+
+- A run's (and a preview's) sandbox binds read-write only its own `work/<ticket>/` and `home/`; the skills snapshot is read-only. `repo/` and other tickets' clones are not visible.
+- A ticket clone is built in a hidden `work/.<ticket>.new-*` directory (fetch from `repo/`, checkout) and renamed into place, so nothing agent-controlled exists while the app runs git in it. A path in `work/` that is not a real clone is moved aside (`<ticket>.stale-*`). Job clones are deleted when the job ends; ticket clones when the PR merges.
+- Git the app runs never reads an agent's config outside a sandbox: `push_branch` fetches the branch into `repo/` with `upload-pack` running in a sandbox that sees only that clone (read-only), then pushes from `repo/`; refreshing a clone's `origin/*` from `repo/` runs `git fetch` in a sandbox that sees the clone (read-write) and `repo/` (read-only). The current branch is read from `.git/HEAD`, not with git. Every git the app runs also gets `core.hooksPath=/dev/null`, `core.fsmonitor=false`, no submodules (and git on local clones only the file transport), `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL=/dev/null` (so no filter or credential driver is configured).
+- Fetch from GitHub uses the project's stored `owner/name`, never a remote URL read from a clone.
+- File operations the app does under `home/` or a clone (skill symlinks, config dirs, `mcp.json`, copying a transcript to another account on resume, reading an artifact) go through an `os.Root` at that directory, so a planted symlink cannot lead outside it (absolute symlinks are refused). Files are created exclusively after removing what was there; artifacts are opened once and read from that handle, and must lie in the run's clone or `home/`.
+- Skill benchmarks (`claude plugin eval`, which uses tools) run in the same sandbox with only their temporary work dir writable.
+- The workspace layout is versioned in the `workspace_layout` setting. Project directories from before version 2, when the whole project directory was writable from the sandbox, are moved aside once to `projects/<id>.legacy-<time>` and rebuilt from GitHub; unpushed work there is left for the operator.
+
 ## App MCP tools (per run)
 
 `submit_questions(tree)`, `submit_requirement(markdown)`, `submit_decisions(markdown)`, `submit_prototypes(list)`, `start_preview(command, port)`, `submit_proof(report_markdown, files)`, `upload_artifact(path)`, `push_branch()`, `open_pr(title, body, draft)`, `update_pr(body)`, `ci_status()`, `ci_logs(check)`, `get_issue()`, `comment(body)`, `list_pulls()`, `request_wait_ci()`, `stage_done(summary)`. There is deliberately no merge tool.

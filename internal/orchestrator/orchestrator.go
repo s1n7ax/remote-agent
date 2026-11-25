@@ -41,9 +41,11 @@ type Options struct {
 	Log      *slog.Logger
 	// Now is the clock; tests replace it.
 	Now func() time.Time
-	// Sandbox wraps a run's command for a project directory and extra
-	// read-only paths; nil runs agents unsandboxed (tests only).
-	Sandbox func(projectDir, workdir string, ro []string) func(argv, env []string) ([]string, []string)
+	// Sandbox wraps a command so it sees only the read-write dirs rw, the
+	// read-only dirs ro and system paths, starting in workdir. It confines
+	// agent runs, previews and the git the app runs on agent-writable
+	// clones; nil runs them unsandboxed (tests only).
+	Sandbox func(rw, ro []string, workdir string) func(argv, env []string) ([]string, []string)
 	// Register gives a starting run its MCP bearer token; Revoke ends it.
 	Register func(RunInfo) (token string, err error)
 	Revoke   func(token string)
@@ -75,7 +77,7 @@ type Orchestrator struct {
 	now      func() time.Time
 	tick     time.Duration
 	ciPoll   time.Duration
-	sandbox  func(projectDir, workdir string, ro []string) func(argv, env []string) ([]string, []string)
+	sandbox  func(rw, ro []string, workdir string) func(argv, env []string) ([]string, []string)
 	register func(RunInfo) (string, error)
 	revoke   func(string)
 	prev     preview
@@ -92,6 +94,7 @@ type Orchestrator struct {
 	byRun    map[int64]*activeRun
 	draining bool
 	lastCI   map[int64]time.Time
+	repoMu   map[int64]*sync.Mutex // serialises writes to a project's repo/
 	wg       sync.WaitGroup
 }
 
@@ -121,6 +124,7 @@ func New(o Options) *Orchestrator {
 		active:  map[int64]*activeRun{},
 		byRun:   map[int64]*activeRun{},
 		lastCI:  map[int64]time.Time{},
+		repoMu:  map[int64]*sync.Mutex{},
 	}
 }
 
@@ -137,6 +141,9 @@ func (o *Orchestrator) Kick() {
 
 // Run drives the scheduler until ctx ends, then stops every active run.
 func (o *Orchestrator) Run(ctx context.Context) error {
+	if err := o.migrateLayout(ctx); err != nil {
+		return err
+	}
 	if err := o.recover(ctx); err != nil {
 		return err
 	}

@@ -52,8 +52,13 @@ type GitHub interface {
 	ListPulls(ctx context.Context, repo string) ([]PullState, error)
 	Pull(ctx context.Context, repo string, number int) (PullState, error)
 	FailedLogs(ctx context.Context, repo string, check Check) (string, error)
+	// Clone clones repo into dir, the app's own clone (repo/).
 	Clone(ctx context.Context, repo, dir string) error
-	Fetch(ctx context.Context, dir string) error
-	// Push pushes branch from dir; it refuses the default branch.
+	// Fetch updates the remote-tracking branches of the app's clone dir
+	// from repo. The repo is the project's stored one, never a remote read
+	// from a clone's config.
+	Fetch(ctx context.Context, repo, dir string) error
+	// Push pushes branch of the app's clone dir to repo; it refuses the
+	// default branch. dir is never agent-writable.
 	Push(ctx context.Context, repo, dir, branch string) error
 }

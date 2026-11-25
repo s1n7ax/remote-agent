@@ -115,6 +115,8 @@ type fakeGitHub struct {
 	merges    []string // "number:method"
 	markReady []int
 	pushes    []string
+	pushDirs  []string
+	fetches   []string // repo of each Fetch
 }
 
 func newFakeGitHub(origin string) *fakeGitHub {
@@ -235,7 +237,10 @@ func (g *fakeGitHub) Clone(ctx context.Context, _ string, dir string) error {
 	return git(ctx, "clone", g.origin, dir)
 }
 
-func (g *fakeGitHub) Fetch(ctx context.Context, dir string) error {
+func (g *fakeGitHub) Fetch(ctx context.Context, repo, dir string) error {
+	g.mu.Lock()
+	g.fetches = append(g.fetches, repo)
+	g.mu.Unlock()
 	return git(ctx, "-C", dir, "fetch", "--prune", "origin")
 }
 
@@ -250,6 +255,7 @@ func (g *fakeGitHub) Push(ctx context.Context, _ string, dir, branch string) err
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.pushes = append(g.pushes, branch)
+	g.pushDirs = append(g.pushDirs, dir)
 	for _, pr := range g.pulls {
 		if pr.Branch == branch && pr.HeadSHA != sha {
 			// A new head starts a new CI run.
@@ -505,6 +511,11 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		t.Fatal(err)
 	}
 
+	// Run migrates the layout too; doing it first keeps it from moving
+	// aside files a test plants under projects/ before its first run.
+	if err := h.o.migrateLayout(ctx); err != nil {
+		t.Fatal(err)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- h.o.Run(runCtx) }()
