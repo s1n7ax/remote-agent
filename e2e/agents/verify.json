@@ -1,0 +1,31 @@
+[
+  {
+    "log": "verifying"
+  },
+  {
+    "exec": "echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg== | base64 -d > proof.png"
+  },
+  {
+    "mcp": {
+      "tool": "submit_proof",
+      "args": {
+        "verdict": "PASS",
+        "report_markdown": "# Verify\n\nGreeting present. PASS",
+        "files": [
+          "proof.png"
+        ]
+      }
+    }
+  },
+  {
+    "mcp": {
+      "tool": "stage_done",
+      "args": {
+        "summary": "verified"
+      }
+    }
+  },
+  {
+    "done": "verified"
+  }
+]

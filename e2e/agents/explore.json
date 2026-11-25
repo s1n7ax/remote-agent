@@ -1,0 +1,14 @@
+[
+  {"log": "exploring the idea"},
+  {"sleep_ms": 300},
+  {"mcp": {"tool": "submit_questions", "args": {"purpose": "requirement", "tree": {
+    "title": "Greeting requirement",
+    "questions": [
+      {"id": "where", "kind": "single", "title": "Where should the greeting go?",
+       "options": [{"id": "readme", "label": "README", "recommended": true}, {"id": "file", "label": "A new file"}]},
+      {"id": "filename", "kind": "text", "title": "Which file name?", "showIf": {"question": "where", "anyOf": ["file"]}},
+      {"id": "tone", "kind": "single", "title": "Tone?",
+       "options": [{"id": "formal", "label": "Formal"}, {"id": "casual", "label": "Casual", "recommended": true}]}
+    ]}}}},
+  {"done": "posted round 1"}
+]

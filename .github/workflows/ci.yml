@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - name: go vet and go test
+        run: nix develop -c sh -c 'go vet ./... && go test ./...'
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: present
+        name: Check for web/package.json
+        run: |
+          if [ -f web/package.json ]; then echo "web=true" >> "$GITHUB_OUTPUT"; else echo "web=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.present.outputs.web == 'true'
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - if: steps.present.outputs.web == 'true'
+        uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - if: steps.present.outputs.web == 'true'
+        name: npm ci, check, test, build
+        run: |
+          nix develop -c sh -c '
+            set -e
+            cd web
+            npm ci
+            npm run check
+            npm test
+            npm run build
+          '
+      - if: steps.present.outputs.web != 'true'
+        run: echo "web/package.json not present; skipping"
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Enable KVM for NixOS VM tests
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+          extra-conf: system-features = nixos-test benchmark big-parallel kvm
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - name: nix flake check (package, VM test, go, nixfmt)
+        run: nix flake check -L
+      - name: DigitalOcean image evaluates
+        run: nix eval --raw .#packages.x86_64-linux.do-image.drvPath
+      - name: actionlint
+        run: nix develop -c actionlint
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: present
+        name: Check for e2e/package.json
+        run: |
+          if [ -f e2e/package.json ]; then echo "e2e=true" >> "$GITHUB_OUTPUT"; else echo "e2e=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.present.outputs.e2e == 'true'
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+      - if: steps.present.outputs.e2e == 'true'
+        uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - if: steps.present.outputs.e2e == 'true'
+        name: Allow unprivileged user namespaces (agents run in bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - if: steps.present.outputs.e2e == 'true'
+        name: Playwright smoke test (browsers from nixpkgs via the dev shell)
+        run: nix develop -c sh -c 'npm --prefix e2e ci && cd e2e && npx playwright test'
+      - if: steps.present.outputs.e2e != 'true'
+        run: echo "e2e/package.json not present; skipping"

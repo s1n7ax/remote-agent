@@ -1,0 +1,6 @@
+version: "2"
+linters:
+  exclusions:
+    # Unchecked Close/Flush/os.Remove etc. on cleanup paths.
+    presets:
+      - std-error-handling
