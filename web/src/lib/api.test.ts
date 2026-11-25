@@ -32,6 +32,19 @@ describe('api over fetch', () => {
     expect(h['X-Requested-With']).toBe('remote-agent');
   });
 
+  it('sends images as multipart without a JSON content type', async () => {
+    const calls = fakeFetch(201, { id: 'u1' });
+    const f = new File([new Uint8Array([1])], 'shot.png', { type: 'image/png' });
+    expect(await api.uploadImage(3, f)).toEqual({ id: 'u1' });
+    expect(calls[0].url).toBe('/api/projects/3/uploads');
+    const body = calls[0].init.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect((body.get('file') as File).name).toBe('shot.png');
+    const h = calls[0].init.headers as Record<string, string>;
+    expect(h['Content-Type']).toBeUndefined();
+    expect(h['X-Requested-With']).toBe('remote-agent');
+  });
+
   it('sends X-Requested-With on every non-GET request and never on GET', async () => {
     const calls = fakeFetch(200, {});
     await api.state();
@@ -82,6 +95,20 @@ describe('api over fetch', () => {
 });
 
 describe('mock transport', () => {
+  it('attaches uploads on create and keeps image numbers after a removal', async () => {
+    setTransport(mockTransport);
+    const png = (n: string) => new File([new Uint8Array([1])], n, { type: 'image/png' });
+    const a = await api.uploadImage(1, png('a.png'));
+    const b = await api.uploadImage(1, png('b.png'));
+    await expect(api.uploadImage(1, new File(['x'], 'x.pdf', { type: 'application/pdf' }))).rejects.toThrow('only images');
+    const t = await api.createTicket(1, { idea: 'see image 2', agent: 'claude', model: 'opus', effort: 'high', prototypes: false, images: [a.id, b.id] });
+    expect((await api.ticket(t.id)).images.map((im) => im.n)).toEqual([1, 2]);
+    expect((await api.addImage(t.id, png('c.png'))).n).toBe(3);
+    await api.removeImage(t.id, 2);
+    expect((await api.ticket(t.id)).images.map((im) => im.n)).toEqual([1, 3]);
+    expect((await api.addImage(t.id, png('d.png'))).n).toBe(4);
+  });
+
   it('completes round 2 once every visible question is answered', async () => {
     setTransport(mockTransport);
     const d = await api.ticket(101);

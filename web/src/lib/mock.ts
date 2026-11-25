@@ -18,6 +18,7 @@ import type {
   Prototype,
   PullRequest,
   Round,
+  TicketImage,
   Run,
   RunEvent,
   Schedule,
@@ -41,6 +42,10 @@ const ahead = (min: number) => new Date(now + min * 60_000).toISOString();
 const models: Partial<Record<AgentKind, string[]>> = {
   claude: ['opus', 'sonnet', 'haiku', 'fable'],
   pi: ['anthropic/claude-sonnet-latest', 'deepseek/deepseek-v4.1-flash', 'openai/gpt-5.5', 'google/gemini-3-pro'],
+};
+// google/gemini-3-pro is missing, as from pi's catalog: picking it warns.
+const imageModels: Partial<Record<AgentKind, string[]>> = {
+  pi: ['anthropic/claude-sonnet-latest', 'deepseek/deepseek-v4.1-flash', 'openai/gpt-5.5'],
 };
 const efforts: Partial<Record<AgentKind, string[]>> = {
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -553,9 +558,36 @@ function detail(id: number) {
     rounds: rounds.filter((r) => r.ticketId === id).sort((a, b) => a.n - b.n),
     runs: runs.filter((r) => r.ticketId === id),
     prototypes: prototypes[id] ?? [],
+    images: (images[id] ?? []).filter((im) => !im.removed).map(({ removed: _, ...im }) => im),
   };
   if (proofs[id]) out.proof = proofs[id];
   if (preview?.ticketId === id) out.preview = preview;
+  return out;
+}
+
+// ---------- images ----------
+
+const images: Record<number, (TicketImage & { removed?: boolean })[]> = {};
+const uploads: Record<string, TicketImage> = {};
+let imageSeq = 0;
+
+/** Stores an uploaded file the way the server does (type and size checked) and returns its artifact id. */
+function storeImage(body: unknown): TicketImage {
+  const file = body instanceof FormData ? body.get('file') : null;
+  if (!(file instanceof File)) throw new ApiError(400, 'no image in the request (form field "file")');
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type))
+    throw new ApiError(400, 'invalid request: only images (JPEG, PNG, WebP, GIF) can be attached');
+  if (file.size > 20 << 20) throw new ApiError(400, 'invalid request: each image can be at most 20 MB');
+  const id = `img-${++imageSeq}`;
+  artifacts[id] = URL.createObjectURL(file);
+  return { n: 0, artifactId: id, name: file.name, mime: file.type, size: file.size, createdAt: new Date().toISOString() };
+}
+
+function attach(ticketId: number, im: TicketImage): TicketImage {
+  const list = (images[ticketId] ??= []);
+  if (list.filter((x) => !x.removed).length >= 10) throw new ApiError(400, 'invalid request: a ticket can have at most 10 images');
+  const out = { ...im, n: (list.at(-1)?.n ?? 0) + 1 };
+  list.push(out);
   return out;
 }
 
@@ -574,6 +606,7 @@ on('GET', '/api/state', (): AppState => ({
   settings,
   models,
   efforts,
+  imageModels,
   vapidPublicKey: MOCK_VAPID,
   preview,
   activeRuns: runs.filter((r) => r.status === 'running').length,
@@ -628,9 +661,27 @@ on('POST', '/api/projects/(\\d+)/tickets', (m, b) => {
     startAt: b.startAt,
     createdAt: new Date().toISOString(),
   });
+  const ups: string[] = b.images ?? [];
+  if (ups.some((id) => !uploads[id])) throw new ApiError(400, 'invalid request: an image upload is missing or expired; add the image again');
   tickets.push(t);
+  for (const id of ups) {
+    attach(t.id, uploads[id]);
+    delete uploads[id];
+  }
   emit({ type: 'board', projectId: t.projectId });
   return t;
+});
+on('POST', '/api/projects/(\\d+)/uploads', (_m, b) => {
+  const im = storeImage(b);
+  uploads[im.artifactId] = im;
+  return { id: im.artifactId };
+});
+on('POST', '/api/tickets/(\\d+)/images', (m, b) => attach(find(tickets, (x) => x.id === +m[1], 'ticket').id, storeImage(b)));
+on('DELETE', '/api/tickets/(\\d+)/images/(\\d+)', (m) => {
+  const im = (images[+m[1]] ?? []).find((x) => x.n === +m[2] && !x.removed);
+  if (!im) throw new ApiError(404, `image ${m[2]}: not found`);
+  im.removed = true;
+  return { removed: true };
 });
 on('GET', '/api/tickets/(\\d+)', (m) => detail(+m[1]));
 on('PATCH', '/api/tickets/(\\d+)', (m, b) => {
@@ -849,7 +900,8 @@ export const mockTransport: Transport = async (method, path, body) => {
     if (m !== method) continue;
     const match = p.match(re);
     if (match) {
-      const out = await h(match, body === undefined ? undefined : structuredClone(body), new URLSearchParams(qs));
+      const arg = body === undefined || body instanceof FormData ? body : structuredClone(body);
+      const out = await h(match, arg, new URLSearchParams(qs));
       return out === undefined ? undefined : structuredClone(out);
     }
   }
