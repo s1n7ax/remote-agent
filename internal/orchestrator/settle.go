@@ -90,8 +90,12 @@ func (o *Orchestrator) afterLimit(ctx context.Context, t *domain.Ticket) {
 // advance moves a ticket past a stage that succeeded.
 func (o *Orchestrator) advance(ctx context.Context, t *domain.Ticket, questions, prOpened bool, proof *domain.Proof) {
 	if questions {
-		// The run posted a round; submitQuestions already parked the ticket.
-		t.Status = domain.StatusNeedsInput
+		// The run posted a round. If the user already answered it while the
+		// run was finishing, roundCompleted has queued the next stage: keep
+		// that instead of parking the ticket with no open round.
+		if rd, err := o.OpenRound(ctx, t.ID); err != nil || rd != nil {
+			t.Status = domain.StatusNeedsInput
+		}
 		return
 	}
 	t.StatusNote = ""

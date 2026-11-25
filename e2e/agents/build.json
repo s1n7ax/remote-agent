@@ -1,0 +1,7 @@
+[
+  {"log": "building"},
+  {"exec": "echo 'Hello from remote-agent' >> README.md && git add README.md && git -c user.name=agent -c user.email=agent@example.invalid commit -qm 'feat: add greeting'"},
+  {"mcp": {"tool": "open_pr", "args": {"title": "Add greeting", "body": "Adds a greeting.", "draft": true}}},
+  {"mcp": {"tool": "stage_done", "args": {"summary": "PR opened"}}},
+  {"done": "built"}
+]

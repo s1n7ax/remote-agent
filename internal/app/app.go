@@ -78,8 +78,8 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 		Config: cfg, Store: st, GitHub: gh, Runners: runners, Notifier: notifier, Skills: sk, Log: log,
 		Register: func(ri orchestrator.RunInfo) (string, error) {
 			// The agent may hand over any file in its project directory
-			// (screenshots land outside the ticket checkout).
-			return mcp.Register(mcpserver.Run{ID: ri.RunID, TicketID: ri.TicketID, Stage: ri.Stage, Workdir: ri.ProjectDir})
+			// (screenshots can land outside the ticket checkout).
+			return mcp.Register(mcpserver.Run{ID: ri.RunID, TicketID: ri.TicketID, Stage: ri.Stage, Workdir: ri.Workdir, Root: ri.ProjectDir})
 		},
 		Revoke: mcp.Revoke,
 	}

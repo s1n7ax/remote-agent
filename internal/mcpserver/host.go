@@ -13,9 +13,12 @@ type Run struct {
 	ID       int64
 	TicketID int64
 	Stage    domain.Stage
-	// Workdir is the absolute directory the run works in; file paths the
-	// agent passes must resolve (after symlinks) inside it.
+	// Workdir is the absolute directory the run works in; relative file
+	// paths the agent passes resolve against it.
 	Workdir string
+	// Root is the directory those files must resolve (after symlinks)
+	// inside; Workdir when empty.
+	Root string
 	// Tools limits the tools the run sees; empty means every tool. Names are
 	// the Tool* constants.
 	Tools []string

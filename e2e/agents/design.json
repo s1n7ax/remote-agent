@@ -1,0 +1,9 @@
+[
+  {"log": "writing requirement and design"},
+  {"mcp": {"tool": "submit_requirement", "args": {"markdown": "# Requirement\n\n- Add a greeting.\n"}}},
+  {"mcp": {"tool": "submit_decisions", "args": {"markdown": "# Decisions\n\n- Append to README.\n"}}},
+  {"mcp": {"tool": "submit_questions", "args": {"purpose": "design", "tree": {
+    "title": "Confirm",
+    "questions": [{"id": "ok", "kind": "confirm", "title": "Build it as described?"}]}}}},
+  {"done": "posted round 2"}
+]

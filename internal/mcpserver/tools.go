@@ -177,7 +177,7 @@ func (t *tools) defs() []toolDef {
 		}),
 		define(ToolSubmitProof, descSubmitProof, schemaSubmitProof, false, t.submitProof),
 		define(ToolUploadArtifact, descUploadArtifact, schemaPath, false, func(ctx context.Context, in pathIn) (any, error) {
-			path, err := resolveFile(t.run.Workdir, in.Path)
+			path, err := resolveFile(t.run.Workdir, t.run.Root, in.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -304,7 +304,7 @@ func (t *tools) submitProof(ctx context.Context, in proofIn) (any, error) {
 	}
 	files := make([]string, 0, len(in.Files))
 	for _, f := range in.Files {
-		path, err := resolveFile(t.run.Workdir, f)
+		path, err := resolveFile(t.run.Workdir, t.run.Root, f)
 		if err != nil {
 			return nil, err
 		}

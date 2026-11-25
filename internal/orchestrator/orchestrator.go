@@ -324,7 +324,7 @@ func (o *Orchestrator) notify(ctx context.Context, ev domain.NotifyEvent, t doma
 	if o.notifier == nil {
 		return
 	}
-	url := fmt.Sprintf("%s/#/tickets/%d", o.cfg.PublicURL, t.ID)
+	url := fmt.Sprintf("%s/#/p/%d/t/%d", o.cfg.PublicURL, t.ProjectID, t.ID)
 	o.notifier.Notify(ctx, ev, t.Title, body, url)
 }
 

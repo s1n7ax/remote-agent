@@ -1,0 +1,7 @@
+[
+  {"log": "verifying"},
+  {"exec": "printf '\\x89PNG\\r\\n\\x1a\\n' > proof.png"},
+  {"mcp": {"tool": "submit_proof", "args": {"verdict": "PASS", "report_markdown": "# Verify\n\nGreeting present. PASS", "files": ["proof.png"]}}},
+  {"mcp": {"tool": "stage_done", "args": {"summary": "verified"}}},
+  {"done": "verified"}
+]

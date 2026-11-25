@@ -9,11 +9,14 @@ import (
 
 // resolveFile turns path (absolute, or relative to workdir) into an absolute
 // path of a regular file that lies inside workdir after resolving symlinks.
-func resolveFile(workdir, path string) (string, error) {
+func resolveFile(workdir, rootDir, path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	root, err := filepath.EvalSymlinks(workdir)
+	if rootDir == "" {
+		rootDir = workdir
+	}
+	root, err := filepath.EvalSymlinks(rootDir)
 	if err != nil {
 		return "", fmt.Errorf("workdir: %w", err)
 	}
@@ -26,7 +29,7 @@ func resolveFile(workdir, path string) (string, error) {
 	}
 	rel, err := filepath.Rel(root, real)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("file %q is outside the working directory %s", path, workdir)
+		return "", fmt.Errorf("file %q is outside %s", path, rootDir)
 	}
 	info, err := os.Stat(real)
 	if err != nil {
