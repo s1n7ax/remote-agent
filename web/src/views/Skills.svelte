@@ -216,9 +216,9 @@
     font-size: 14px;
     line-height: 1.5;
     tab-size: 2;
-    white-space: pre;
-    overflow-wrap: normal;
-    overflow-x: auto;
+    /* Skills are prose; wrap so nothing runs off a phone screen. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .commit {
     display: flex;

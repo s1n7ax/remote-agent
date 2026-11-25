@@ -148,7 +148,7 @@
         <span class="pill"><span class="lamp"></span>{STATUS_LABEL[t.status]}</span>
         <span class="badge">{t.kind === 'job' ? 'job' : `stage: ${t.stage}`}</span>
         {#if t.issue}<a class="badge" href="https://github.com/{project.repo}/issues/{t.issue}" target="_blank" rel="noopener noreferrer">issue #{t.issue}</a>{/if}
-        {#if t.agent === 'pi'}<span class="badge">{usd(t.spendUsd)} of {usd(t.spendCapUsd)}</span>{/if}
+        {#if t.agent === 'pi'}<span class="badge">{usd(t.spendUsd)}{t.spendCapUsd > 0 ? ` of ${usd(t.spendCapUsd)}` : ' spent'}</span>{/if}
       </div>
       {#if t.waitUntil}
         <p class="note">Waiting until {clock(t.waitUntil)} ({relative(t.waitUntil)}). It resumes by itself.</p>

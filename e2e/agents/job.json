@@ -1,0 +1,6 @@
+[
+  {"log": "running the scheduled job"},
+  {"mcp": {"tool": "list_pulls", "args": {}}},
+  {"mcp": {"tool": "stage_done", "args": {"summary": "job done"}}},
+  {"done": "job done"}
+]

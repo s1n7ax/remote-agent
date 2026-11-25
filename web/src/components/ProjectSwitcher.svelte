@@ -44,7 +44,7 @@
       <li>
         <a class={{ on: p.id === current?.id }} href={href({ name: 'board', projectId: p.id })} onclick={() => (open = false)}>
           <strong>{p.name}</strong>
-          <span class="muted small">{p.repo} · {app.modelLabel(p.agent, p.model)} · {p.effort}</span>
+          <span class="muted small">{[p.repo, p.model && app.modelLabel(p.agent, p.model), p.effort].filter(Boolean).join(' · ')}</span>
         </a>
       </li>
     {/each}
