@@ -187,6 +187,23 @@ type AnswerResult struct {
 // Answer saves one answer. When it completes the round, the ticket moves to
 // ready (no click needed) and the next run is queued.
 func (o *Orchestrator) Answer(ctx context.Context, ticketID int64, n int, qid string, a domain.Answer) (AnswerResult, error) {
+	// The round's answers map and the ticket row are read-modify-written
+	// under tmu, so concurrent answers do not drop each other, only one of
+	// them completes the round, and settle sees either the open round or
+	// the resumed ticket.
+	o.tmu.Lock()
+	res, err := o.answerLocked(ctx, ticketID, n, qid, a)
+	o.tmu.Unlock()
+	if err != nil || !res.Completed {
+		return res, err
+	}
+	o.postRoundSummary(ctx, res.Ticket, res.Round)
+	o.Kick()
+	return res, nil
+}
+
+// answerLocked is Answer's read-modify-write; the caller holds tmu.
+func (o *Orchestrator) answerLocked(ctx context.Context, ticketID int64, n int, qid string, a domain.Answer) (AnswerResult, error) {
 	var res AnswerResult
 	rd, err := o.st.Round(ctx, ticketID, n)
 	if err != nil {
@@ -256,6 +273,7 @@ func checkAnswer(q domain.Question, a domain.Answer) error {
 }
 
 // roundCompleted resumes a ticket whose open round is now fully answered.
+// The caller holds tmu and passes the ticket's current row.
 func (o *Orchestrator) roundCompleted(ctx context.Context, t *domain.Ticket, rd domain.Round) error {
 	t.StatusNote = ""
 	t.Stage = rd.Stage
@@ -270,19 +288,22 @@ func (o *Orchestrator) roundCompleted(ctx context.Context, t *domain.Ticket, rd 
 			t.StatusNote = "stopped at the spend cap"
 		}
 	}
-	if rd.Purpose != domain.PurposeSpendCap && t.Issue != 0 {
-		if p, err := o.st.Project(ctx, t.ProjectID); err == nil {
-			marker := fmt.Sprintf("<!-- remote-agent:round:%d -->", rd.N)
-			if err := o.gh.UpsertComment(ctx, p.Repo, t.Issue, marker, marker+"\n"+questions.Summary(rd)); err != nil {
-				o.log.Warn("post round summary", "ticket", t.ID, "err", err)
-			}
-		}
+	return o.save(ctx, t)
+}
+
+// postRoundSummary mirrors a completed round on the ticket's issue.
+func (o *Orchestrator) postRoundSummary(ctx context.Context, t domain.Ticket, rd domain.Round) {
+	if rd.Purpose == domain.PurposeSpendCap || t.Issue == 0 {
+		return
 	}
-	if err := o.save(ctx, t); err != nil {
-		return err
+	p, err := o.st.Project(ctx, t.ProjectID)
+	if err != nil {
+		return
 	}
-	o.Kick()
-	return nil
+	marker := fmt.Sprintf("<!-- remote-agent:round:%d -->", rd.N)
+	if err := o.gh.UpsertComment(ctx, p.Repo, t.Issue, marker, marker+"\n"+questions.Summary(rd)); err != nil {
+		o.log.Warn("post round summary", "ticket", t.ID, "err", err)
+	}
 }
 
 // OpenRound returns the ticket's open round, if any.
@@ -302,15 +323,42 @@ func (o *Orchestrator) OpenRound(ctx context.Context, ticketID int64) (*domain.R
 // Merge merges a ticket's (or any project's) PR. Only the user's explicit
 // merge button reaches this; agents have no path to it.
 func (o *Orchestrator) Merge(ctx context.Context, projectID int64, number int, method string) error {
+	return o.MergeAt(ctx, projectID, number, method, "")
+}
+
+// MergeAt is Merge with the head SHA the user saw. A ticket's PR merges only
+// at the commit its verify run tested (seenSHA is ignored); any other PR
+// merges at seenSHA, or at its current head when seenSHA is empty.
+func (o *Orchestrator) MergeAt(ctx context.Context, projectID int64, number int, method, seenSHA string) error {
 	p, err := o.st.Project(ctx, projectID)
 	if err != nil {
 		return err
 	}
-	if err := o.gh.MergePull(ctx, p.Repo, number, method); err != nil {
-		return err
-	}
 	ts, err := o.st.ProjectTickets(ctx, projectID)
 	if err != nil {
+		return err
+	}
+	head := seenSHA
+	for _, t := range ts {
+		if t.PR != number || t.Kind != domain.KindTicket {
+			continue
+		}
+		if t.VerifiedSHA == "" {
+			return invalid("PR #%d has no verified commit yet; it can be merged once its ticket is verified", number)
+		}
+		pr, err := o.gh.Pull(ctx, p.Repo, number)
+		if err != nil {
+			return err
+		}
+		if pr.HeadSHA != t.VerifiedSHA {
+			o.RecheckCI(t.ID)
+			return invalid("PR #%d head %s is not the verified commit %s; it must be verified again before merging",
+				number, shortSHA(pr.HeadSHA), shortSHA(t.VerifiedSHA))
+		}
+		head = t.VerifiedSHA
+		break
+	}
+	if err := o.gh.MergePull(ctx, p.Repo, number, method, head); err != nil {
 		return err
 	}
 	for _, t := range ts {
@@ -319,6 +367,13 @@ func (o *Orchestrator) Merge(ctx context.Context, projectID int64, number int, m
 		}
 	}
 	return nil
+}
+
+func shortSHA(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }
 
 // DeleteTicket stops a ticket's run, removes its worktree and deletes it.

@@ -56,6 +56,7 @@ func (o *Orchestrator) RecheckCI(ticketID int64) {
 
 // onPull applies a PR's state to its ticket and reports whether it changed.
 func (o *Orchestrator) onPull(ctx context.Context, t *domain.Ticket, pr PullState) bool {
+	notify := func(ev domain.NotifyEvent, t domain.Ticket, body string) { o.notify(ctx, ev, t, body) }
 	switch {
 	case pr.Merged:
 		t.Status, t.Stage = domain.StatusDone, domain.StageMerged
@@ -67,11 +68,17 @@ func (o *Orchestrator) onPull(ctx context.Context, t *domain.Ticket, pr PullStat
 		t.Status = domain.StatusFailed
 		t.StatusNote = "the PR was closed without merging"
 		return true
+	case t.Status == domain.StatusInReview && pr.HeadSHA != t.VerifiedSHA:
+		// Review (and Merge) are for the verified commit only.
+		t.Stage, t.Status = domain.StageVerify, domain.StatusReady
+		t.StatusNote = "the PR head moved after verification; verifying " + shortSHA(pr.HeadSHA)
+		t.VerifiedSHA = ""
+		return true
 	case pr.MergeableState == "dirty":
-		o.toFix(ctx, t, "merge conflict with the base branch")
+		toFix(t, "merge conflict with the base branch", notify)
 		return true
 	case pr.CI == "failure":
-		o.toFix(ctx, t, "CI failed")
+		toFix(t, "CI failed", notify)
 		return true
 	case pr.CI == "success" || pr.CI == "none":
 		if t.Status == domain.StatusInReview {

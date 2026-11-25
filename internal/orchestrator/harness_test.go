@@ -113,6 +113,7 @@ type fakeGitHub struct {
 	bodies    map[int]string // PR number → body
 	comments  []ghComment
 	merges    []string // "number:method"
+	mergeSHAs []string // the head each merge required
 	markReady []int
 	pushes    []string
 }
@@ -193,13 +194,17 @@ func (g *fakeGitHub) MarkReady(_ context.Context, _ string, n int) error {
 	return nil
 }
 
-func (g *fakeGitHub) MergePull(_ context.Context, _ string, n int, method string) error {
+func (g *fakeGitHub) MergePull(_ context.Context, _ string, n int, method, headSHA string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	pr := g.pulls[n]
 	if pr == nil {
 		return fmt.Errorf("no PR %d", n)
 	}
+	if headSHA != "" && headSHA != pr.HeadSHA {
+		return fmt.Errorf("head of PR %d is %s, not %s", n, pr.HeadSHA, headSHA) // GitHub's 409
+	}
+	g.mergeSHAs = append(g.mergeSHAs, headSHA)
 	pr.Merged, pr.State = true, "closed"
 	g.merges = append(g.merges, fmt.Sprintf("%d:%s", n, method))
 	return nil

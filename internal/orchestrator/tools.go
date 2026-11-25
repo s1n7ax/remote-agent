@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/s1n7ax/remote-agent/internal/domain"
@@ -314,8 +316,13 @@ func currentBranch(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ToolPushBranch pushes the branch checked out in the run's workdir. The
-// GitHub layer refuses the default branch.
+// ticketBranch matches a ticket's goal branch, ra/<ticket id>-<slug>.
+var ticketBranch = regexp.MustCompile(`^ra/([0-9]+)-`)
+
+// ToolPushBranch pushes the branch checked out in the run's workdir: a
+// ticket's run only its own goal branch, a job's run any branch but the
+// default one and the tickets' goal branches. The GitHub layer refuses the
+// default branch too.
 func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string, error) {
 	ar, err := o.runByID(runID)
 	if err != nil {
@@ -327,6 +334,13 @@ func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string,
 	}
 	if branch == ar.project.DefaultBranch {
 		return "", invalid("refusing to push the default branch %q", branch)
+	}
+	if own := ar.ticket.Branch; own != "" || ar.ticket.Kind != domain.KindJob {
+		if branch != own {
+			return "", invalid("refusing to push %q: this ticket pushes only its branch %q", branch, own)
+		}
+	} else if m := ticketBranch.FindStringSubmatch(branch); m != nil && m[1] != strconv.FormatInt(ar.ticket.ID, 10) {
+		return "", invalid("refusing to push %q: it is ticket %s's branch", branch, m[1])
 	}
 	if err := o.gh.Push(ctx, ar.project.Repo, ar.workdir, branch); err != nil {
 		return "", err

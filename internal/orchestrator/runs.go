@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +28,9 @@ type activeRun struct {
 	token   string
 	workdir string
 	browser bool
+	// startSHA is the checkout's HEAD when a verify run started: the
+	// commit it tests, and the only one a PASS may mark verified.
+	startSHA string
 
 	// Set by MCP tool calls during the run.
 	questions bool
@@ -123,6 +128,13 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		releaseBrowser()
 		return false, err
 	}
+	var startSHA string
+	if t.Stage == domain.StageVerify {
+		if startSHA, err = headCommit(ctx, workdir); err != nil {
+			releaseBrowser()
+			return false, err
+		}
+	}
 
 	run, err := o.st.CreateRun(ctx, domain.Run{
 		TicketID: t.ID, Stage: t.Stage, Agent: kind, Model: t.Model, Effort: t.Effort,
@@ -132,7 +144,7 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		releaseBrowser()
 		return false, err
 	}
-	ar := &activeRun{run: run, ticket: t, project: p, workdir: workdir, browser: browser}
+	ar := &activeRun{run: run, ticket: t, project: p, workdir: workdir, browser: browser, startSHA: startSHA}
 	if o.register != nil {
 		tok, err := o.register(RunInfo{RunID: run.ID, TicketID: t.ID, Stage: t.Stage, Workdir: workdir, ProjectDir: o.projectDir(p.ID)})
 		if err != nil {
@@ -410,7 +422,9 @@ func (o *Orchestrator) SendMessage(ctx context.Context, ticketID int64, text str
 }
 
 // Pause freezes a ticket's run (SIGSTOP on its process group): no tokens are
-// spent while paused.
+// spent while paused. The sandbox keeps the agent in that group (no bwrap
+// --new-session); a process the agent moves into a new session or group
+// itself escapes the signal.
 func (o *Orchestrator) Pause(ctx context.Context, ticketID int64) error {
 	return o.signal(ctx, ticketID, syscall.SIGSTOP, true)
 }
@@ -464,6 +478,15 @@ func (o *Orchestrator) Stop(ctx context.Context, ticketID int64) error {
 	}
 	o.event(ctx, ar, domain.EventSystem, "stop requested")
 	return ar.sess.Stop()
+}
+
+// headCommit returns the commit checked out in dir.
+func headCommit(ctx context.Context, dir string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--verify", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("read the checkout's HEAD: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (o *Orchestrator) activeFor(ticketID int64) *activeRun {

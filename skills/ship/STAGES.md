@@ -127,7 +127,7 @@ A run ends when it calls `stage_done(summary)` (the summary goes on the card and
 The skills rely on these; they go beyond the tool list in `docs/architecture.md`.
 
 1. **`purpose` on the question tree**: `"requirement" | "design" | "follow_up"`, top-level next to `round`. It decides the transition above. Default when absent: `follow_up`.
-2. **`push_branch()` pushes the currently checked-out branch** to `origin` (no force) and refuses the default branch. In stage runs that is the goal branch; job runs use it on PR branches.
+2. **`push_branch()` pushes the currently checked-out branch** to `origin` (no force) and refuses the default branch. Stage runs may push only the ticket's goal branch; job runs use it on PR branches, but never on a ticket's `ra/<id>-*` goal branch.
 3. **`open_pr` opens from the goal branch into the base branch**; `update_pr`, `ci_status`, `ci_logs`, `get_issue` and `comment` target the ticket's PR or issue. Job runs have no ticket PR/issue, so for jobs these tools need an optional `number` argument (PR or issue number). `ci_status` in a job reads the checked-out branch's head.
 4. **`start_preview(command, port)`** runs `command` from the checkout root in the ticket's sandbox, keeps it running after the run ends, and stops the previous preview. `submit_prototypes(list)` items carry `{ name, branch, description, artifacts: [ids], preview: { command, port } }` so the app can switch the preview when the user asks.
 5. **`submit_proof(report_markdown, files)`**: `files` are paths relative to the checkout; image links in the markdown use the same relative paths (`.ship/<goal>/verify/<n>/<file>.png`), which the app rewrites to its artifact URLs.

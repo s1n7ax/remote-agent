@@ -100,9 +100,11 @@ func (o *Orchestrator) askSpendCap(ctx context.Context, t domain.Ticket, reason 
 	if _, err := o.st.AddRound(ctx, domain.Round{TicketID: t.ID, Purpose: domain.PurposeSpendCap, Stage: t.Stage, Tree: tree}); err != nil {
 		return err
 	}
-	t.Status = domain.StatusNeedsInput
-	t.StatusNote = reason
-	if err := o.save(ctx, &t); err != nil {
+	t, err := o.mutate(ctx, t.ID, func(c *domain.Ticket) {
+		c.Status = domain.StatusNeedsInput
+		c.StatusNote = reason
+	})
+	if err != nil {
 		return err
 	}
 	o.notify(ctx, domain.NotifyPaused, t, "Spend cap reached: "+reason)

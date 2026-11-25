@@ -47,8 +47,10 @@ type GitHub interface {
 	CreatePull(ctx context.Context, repo, head, base, title, body string, draft bool) (number int, url string, err error)
 	UpdatePullBody(ctx context.Context, repo string, number int, body string) error
 	MarkReady(ctx context.Context, repo string, number int) error
-	// MergePull merges a PR; method is merge | squash | rebase ("" = repo default).
-	MergePull(ctx context.Context, repo string, number int, method string) error
+	// MergePull merges a PR; method is merge | squash | rebase ("" = repo
+	// default). It merges only when the PR's head is headSHA (GitHub
+	// refuses otherwise); "" means the head at the time of the call.
+	MergePull(ctx context.Context, repo string, number int, method, headSHA string) error
 	ListPulls(ctx context.Context, repo string) ([]PullState, error)
 	Pull(ctx context.Context, repo string, number int) (PullState, error)
 	FailedLogs(ctx context.Context, repo string, check Check) (string, error)
