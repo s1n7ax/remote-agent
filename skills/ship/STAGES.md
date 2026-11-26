@@ -27,7 +27,7 @@ Every run gets one message built from this template. Lines in `[…]` are includ
 ```markdown
 You are running the `<stage>` stage of the /ship flow for one ticket on the remote-agent board.
 Read <skillsDir>/ship/SKILL.md, then follow its "Stage: <stage>" section in full.
-You cannot reach the user except through the app's MCP tools. End the run with stage_done.
+You cannot reach the user except through the app's MCP tools. Report the stage's outcome with its tool, end the run with stage_done, and never end a turn to wait for anything: the run ends with your turn.
 
 ## Run
 
@@ -46,6 +46,11 @@ You cannot reach the user except through the app's MCP tools. End the run with s
 - review effort: medium                     [or the ticket's level]
 [- resumed: <reason: follow_up answered | retry after failure | account switch | user resume>]
 
+[## Why the last run stopped
+
+Your previous run of this stage stopped before it finished: <the run's error>.
+Continue the stage from where it stopped; do not redo work the checkout and .ship/<goal>/ already show.]
+
 [## Idea
 
 <idea>]
@@ -57,12 +62,19 @@ Round <n> (<purpose>) — full tree and answers: .ship/<goal>/rounds/<n>.json
 - <qid> — <question title>: <selected option labels, comma-separated> [— "<text>"]
 - …]
 
+[## Requirement
+
+<the ticket's requirement, verbatim>]
+
 [## Trigger
 
-- kind: ci_failed | conflict
+- kind: ci_failed | conflict | verify_failed
 - head: <sha>
 - failing checks: <name> (<conclusion>), …
-- fix round: <1|2> of 2]
+- fix round: <1|2> of 2
+[Last verification report (FAIL):
+
+<the proof's report>]]
 
 [## Job
 
@@ -78,8 +90,8 @@ Round <n> (<purpose>) — full tree and answers: .ship/<goal>/rounds/<n>.json
 | `explore` | yes  | only when resumed after a `follow_up` round       | —       | —   | `next round` is 1 (or the next free number)                |
 | `design`  | yes  | round 1, plus every `follow_up` round since       | —       | —   | `next round` is 2 (or the next free number)                |
 | `build`   | —    | round 2, plus every `follow_up` round since       | —       | —   | `pull request` is set when a resumed build already opened it |
-| `fix`     | —    | only `follow_up` rounds since the last build      | yes     | —   | `pull request` always set                                  |
-| `verify`  | —    | only `follow_up` rounds raised by verify          | —       | —   | `pull request` always set                                  |
+| `fix`     | —    | only `follow_up` rounds since the last build      | yes     | —   | `pull request` always set; `Requirement` included          |
+| `verify`  | —    | only `follow_up` rounds raised by verify          | —       | —   | `pull request` always set; `Requirement` included          |
 | `job`     | —    | —                                                 | —       | yes | `goal`, `goal branch`, `issue`, `pull request`, `next round`, `prototypes`, `critical` are omitted |
 
 Answers list visible questions only, in tree order; a hidden question's answer is never sent.
@@ -106,20 +118,22 @@ Answers list visible questions only, in tree order; a hidden question's answer i
 
 ## What each run hands back, and where the ticket goes
 
-A run ends when it calls `stage_done(summary)` (the summary goes on the card and into the issue/PR summaries the app posts). The ticket's next state depends on what the run submitted:
+A run ends with its turn: the app starts Claude runs with background tasks disabled and without the subagent tool, so nothing outlives the turn. The stage is finished by its **outcome tool** (`open_pr`, `push_branch`, `submit_proof`, `submit_questions`), or by `stage_done(summary)` for explore and job; the summary (or, without it, the agent's last message) goes on the card. The ticket's next state depends on what the run submitted:
 
 | Stage     | Expected calls before `stage_done`                                                      | Next                                                                                 |
 | --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `explore` | `submit_questions` (`purpose: requirement`), or none                                     | questions → `needs_input`, then `ready(design)`; none → `ready(design)`              |
 | `design`  | `submit_requirement`, `submit_decisions`, `submit_questions` (`purpose: design`); with prototypes also `upload_artifact`, `submit_prototypes`, `start_preview` | `needs_input`, then `ready(build)` |
 | `build`   | `push_branch`, `open_pr(draft: true)` (or `update_pr` when resumed)                     | `waiting` (CI, stage `ci`)                                                           |
+| `ci`      | no run: the app polls until every check finished                                         | any check failed → `ready(fix)`; all green → `ready_for_testing(verify)`             |
 | `fix`     | `push_branch`                                                                           | `waiting` (CI); after 2 fix rounds still red → `failed`                              |
-| `verify`  | `submit_proof`, `update_pr`                                                             | app marks the PR ready, waits for CI once more → `in_review`; red → `fix`            |
+| `verify`  | `submit_proof(verdict)`, `update_pr` on PASS                                             | PASS: app marks the PR ready, waits for CI once more → `in_review`; FAIL → `ready(fix)` |
 | `job`     | anything the job needs                                                                  | `done`                                                                               |
 
 - **A `follow_up` round** (`submit_questions` with `purpose: follow_up`) from any stage → `needs_input`, then `ready(<same stage>)` with `resumed: follow_up answered`.
-- **Missing expected calls** (e.g. a build that ends without a PR, with no `follow_up` round) → treat the run as failed: retry per the retry policy, then `failed`.
-- **No `stage_done`** (crash, kill, usage limit) → the run did not finish: re-queue the same stage with `resumed: …`; the skills resume from the checkout's state.
+- **No outcome** (a build that ends without a PR, a verify without a verdict, with no `follow_up` round) → the run failed: the app continues it once — the next Claude run resumes the same session, with `## Why the last run stopped` — and a second such end fails the ticket with the agent's last message. Retry resumes the session again.
+- **Crash, kill, usage limit** → the run did not finish: re-queue the same stage with `resumed: …`; the skills resume from the checkout's state.
+- **Time limit** → each run has one (the project's `runTimeoutMinutes`, else the server's `runTimeoutMinutes`, default 120; time paused does not count). A run that reaches it is stopped, and the ticket fails with `timed out after N minutes`.
 - **`submit_questions` more than once in a run** → reject the second call with an error; the skills never do it.
 
 ## Contract points the app MCP must honour
@@ -130,7 +144,7 @@ The skills rely on these; they go beyond the tool list in `docs/architecture.md`
 2. **`push_branch()` pushes the currently checked-out branch** to `origin` (no force) and refuses the default branch. Stage runs may push only the ticket's goal branch; job runs use it on PR branches, but never on a ticket's `ra/<id>-*` goal branch.
 3. **`open_pr` opens from the goal branch into the base branch**; `update_pr`, `ci_status`, `ci_logs`, `get_issue` and `comment` target the ticket's PR or issue. Job runs have no ticket PR/issue, so for jobs these tools need an optional `number` argument (PR or issue number). `ci_status` in a job reads the checked-out branch's head.
 4. **`start_preview(command, port)`** runs `command` from the checkout root in the ticket's sandbox, keeps it running after the run ends, and stops the previous preview. `submit_prototypes(list)` items carry `{ name, branch, description, artifacts: [ids], preview: { command, port } }` so the app can switch the preview when the user asks.
-5. **`submit_proof(report_markdown, files)`**: `files` are paths relative to the checkout; image links in the markdown use the same relative paths (`.ship/<goal>/verify/<n>/<file>.png`), which the app rewrites to its artifact URLs.
+5. **`submit_proof(verdict, report_markdown, files)`**: `files` are paths relative to the checkout; image links in the markdown use the same relative paths (`.ship/<goal>/verify/<n>/<file>.png`), which the app rewrites to its artifact URLs.
 6. **No merge tool**, and no tool that returns the GitHub token.
 
 ## Example — the first message of a design run
