@@ -339,7 +339,9 @@ func TestVerifyRecordsTheTestedCommit(t *testing.T) {
 		t.Fatal("PR marked ready on an unverified head")
 	}
 	passVerify(t, h, r2)
-	got = h.waitState(tk.ID, domain.StatusWaiting, domain.StageCI)
+	// CI is already green on the new head, so the final wait may pass at
+	// once: wait for whichever state the poll leaves it in.
+	got = h.waitTicket(tk.ID, "verified", func(t domain.Ticket) bool { return t.VerifiedSHA != "" })
 	if got.VerifiedSHA != moved {
 		t.Fatalf("verified sha = %q, want %q", got.VerifiedSHA, moved)
 	}
