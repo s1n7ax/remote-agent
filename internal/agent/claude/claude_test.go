@@ -127,7 +127,7 @@ func TestRunSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-		"--dangerously-skip-permissions", "--model", "opus", "--effort", "high", "--mcp-config", "/mcp.json",
+		"--dangerously-skip-permissions", "--disallowedTools", "Agent,Task", "--model", "opus", "--effort", "high", "--mcp-config", "/mcp.json",
 		"--append-system-prompt", "be brief", "--resume", "/sess.jsonl"}
 	if !slices.Equal(got.Args, want) {
 		t.Errorf("args = %q", got.Args)
@@ -144,6 +144,9 @@ func TestRunSuccess(t *testing.T) {
 		return strings.HasPrefix(kv, "CLAUDE_CONFIG_DIR=") && strings.HasSuffix(kv, "/cfg")
 	}) {
 		t.Errorf("CLAUDE_CONFIG_DIR missing: %q", got.Env)
+	}
+	if !slices.Contains(got.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1") {
+		t.Errorf("background tasks not disabled: %q", got.Env)
 	}
 }
 

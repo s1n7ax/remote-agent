@@ -24,7 +24,7 @@ The /ship step a ticket is in: explore, design, build, ci, fix, verify, merged o
 _Avoid_: phase, step
 
 **Status**:
-Where a ticket sits on the board: backlog, needs input, ready, working, waiting, in review, done or failed.
+Where a ticket sits on the board: backlog, needs input, ready, working, waiting, ready for testing, in review, done or failed.
 _Avoid_: column, state
 
 ## Questions

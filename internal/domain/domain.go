@@ -16,15 +16,17 @@ const (
 	StatusReady      Status = "ready"
 	StatusWorking    Status = "working"
 	StatusWaiting    Status = "waiting"
-	StatusInReview   Status = "in_review"
-	StatusDone       Status = "done"
-	StatusFailed     Status = "failed"
+	// StatusReadyForTesting: CI is green; a verify run tests the PR next.
+	StatusReadyForTesting Status = "ready_for_testing"
+	StatusInReview        Status = "in_review"
+	StatusDone            Status = "done"
+	StatusFailed          Status = "failed"
 )
 
 // Statuses lists every status in board order.
 var Statuses = []Status{
 	StatusBacklog, StatusNeedsInput, StatusReady, StatusWorking,
-	StatusWaiting, StatusInReview, StatusDone, StatusFailed,
+	StatusWaiting, StatusReadyForTesting, StatusInReview, StatusDone, StatusFailed,
 }
 
 // Stage is the /ship step a ticket runs next.
@@ -67,7 +69,10 @@ type Project struct {
 	Agent         AgentKind `json:"agent"`
 	Model         string    `json:"model"`
 	Effort        string    `json:"effort"`
-	CreatedAt     time.Time `json:"createdAt"`
+	// RunTimeoutMinutes stops a run that takes longer; 0 uses the server's
+	// default.
+	RunTimeoutMinutes int       `json:"runTimeoutMinutes"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
 // Ticket is one card on a project's board.
@@ -93,11 +98,14 @@ type Ticket struct {
 	StartAt     *time.Time `json:"startAt,omitempty"`
 	WaitUntil   *time.Time `json:"waitUntil,omitempty"`
 	FixRounds   int        `json:"fixRounds"`
-	SpendUSD    float64    `json:"spendUsd"`
-	SpendCapUSD float64    `json:"spendCapUsd"`
-	JobPrompt   string     `json:"jobPrompt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	// FixTrigger says why the ticket went to fix: ci_failed | conflict |
+	// verify_failed.
+	FixTrigger  string    `json:"fixTrigger,omitempty"`
+	SpendUSD    float64   `json:"spendUsd"`
+	SpendCapUSD float64   `json:"spendCapUsd"`
+	JobPrompt   string    `json:"jobPrompt,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // QuestionKind is how a question is answered.

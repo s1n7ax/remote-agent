@@ -123,7 +123,8 @@ func (g *GitHub) state(ctx context.Context, repo string, p github.Pull) (orchest
 		ps.CI = string(cs.State)
 	}
 	for _, c := range cs.Checks {
-		ps.Checks = append(ps.Checks, orchestrator.Check{Name: c.Name, Status: c.Status, Conclusion: c.Conclusion, URL: c.URL, ID: c.CheckRunID})
+		ps.Checks = append(ps.Checks, orchestrator.Check{Name: c.Name, Status: c.Status, Conclusion: c.Conclusion, URL: c.URL, ID: c.CheckRunID,
+			Pending: c.State == github.CheckPending})
 	}
 	return ps, nil
 }

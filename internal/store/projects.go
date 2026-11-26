@@ -7,11 +7,11 @@ import (
 	"github.com/s1n7ax/remote-agent/internal/domain"
 )
 
-const projectCols = `id, name, repo, default_branch, agent, model, effort, created_at`
+const projectCols = `id, name, repo, default_branch, agent, model, effort, run_timeout_minutes, created_at`
 
 func scanProject(r interface{ Scan(...any) error }) (domain.Project, error) {
 	var p domain.Project
-	err := r.Scan(&p.ID, &p.Name, &p.Repo, &p.DefaultBranch, &p.Agent, &p.Model, &p.Effort, &p.CreatedAt)
+	err := r.Scan(&p.ID, &p.Name, &p.Repo, &p.DefaultBranch, &p.Agent, &p.Model, &p.Effort, &p.RunTimeoutMinutes, &p.CreatedAt)
 	return p, err
 }
 
@@ -19,8 +19,8 @@ func scanProject(r interface{ Scan(...any) error }) (domain.Project, error) {
 func (s *Store) CreateProject(ctx context.Context, p domain.Project) (domain.Project, error) {
 	p.CreatedAt = now()
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO projects(name, repo, default_branch, agent, model, effort, created_at) VALUES(?,?,?,?,?,?,?)`,
-		p.Name, p.Repo, p.DefaultBranch, p.Agent, p.Model, p.Effort, p.CreatedAt)
+		`INSERT INTO projects(name, repo, default_branch, agent, model, effort, run_timeout_minutes, created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		p.Name, p.Repo, p.DefaultBranch, p.Agent, p.Model, p.Effort, p.RunTimeoutMinutes, p.CreatedAt)
 	if err != nil {
 		return p, fmt.Errorf("create project: %w", err)
 	}
@@ -58,8 +58,8 @@ func (s *Store) Projects(ctx context.Context) ([]domain.Project, error) {
 // UpdateProject writes every mutable field of p.
 func (s *Store) UpdateProject(ctx context.Context, p domain.Project) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE projects SET name=?, repo=?, default_branch=?, agent=?, model=?, effort=? WHERE id=?`,
-		p.Name, p.Repo, p.DefaultBranch, p.Agent, p.Model, p.Effort, p.ID)
+		`UPDATE projects SET name=?, repo=?, default_branch=?, agent=?, model=?, effort=?, run_timeout_minutes=? WHERE id=?`,
+		p.Name, p.Repo, p.DefaultBranch, p.Agent, p.Model, p.Effort, p.RunTimeoutMinutes, p.ID)
 	if err != nil {
 		return fmt.Errorf("update project: %w", err)
 	}

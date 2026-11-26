@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -103,5 +104,36 @@ func TestEventsPaging(t *testing.T) {
 	rest, _ := s.Events(ctx, run.ID, page[2].ID, 10)
 	if len(page) != 3 || len(rest) != 2 {
 		t.Fatalf("pages %d %d", len(page), len(rest))
+	}
+}
+
+// A database created before a column existed gets it when opened.
+func TestOpenAddsNewColumns(t *testing.T) {
+	path := t.TempDir() + "/db.sqlite"
+	old, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`CREATE TABLE projects (
+		id INTEGER PRIMARY KEY, name TEXT NOT NULL, repo TEXT NOT NULL UNIQUE,
+		default_branch TEXT NOT NULL DEFAULT 'main', agent TEXT NOT NULL DEFAULT 'claude',
+		model TEXT NOT NULL DEFAULT '', effort TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	p, err := s.CreateProject(ctx, domain.Project{Name: "demo", Repo: "o/demo", RunTimeoutMinutes: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Project(ctx, p.ID)
+	if err != nil || got.RunTimeoutMinutes != 300 {
+		t.Fatalf("project = %+v, %v", got, err)
 	}
 }

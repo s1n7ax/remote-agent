@@ -9,6 +9,8 @@ type Check struct {
 	Conclusion string `json:"conclusion"` // success | failure | … (empty while running)
 	URL        string `json:"url"`
 	ID         int64  `json:"id"`
+	// Pending is true while the check has not finished.
+	Pending bool `json:"pending"`
 }
 
 // PullState is what the CI poller needs to know about a PR.

@@ -113,7 +113,8 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 			k, err := config.ReadSecret(cfg.OpenRouterKeyFile)
 			return err == nil && k != ""
 		},
-		MaxParallel: func() int { return cfg.MaxParallelRuns },
+		MaxParallel:       func() int { return cfg.MaxParallelRuns },
+		RunTimeoutMinutes: func() int { return cfg.RunTimeoutMinutes },
 	}
 
 	servers := []*http.Server{
