@@ -182,7 +182,7 @@
     <p class="muted small">A run that takes longer is stopped, and its ticket fails with the reason; Retry continues it. 0 uses the default of {s.settings.runTimeoutMinutes} minutes, set in the server configuration.</p>
     {#each s.projects as p (p.id)}
       <form class="timeout" onsubmit={(e) => saveTimeout(e, p)}>
-        <label class="field">{p.name} (minutes) <input type="number" min="0" step="5" bind:value={timeouts[p.id]} /></label>
+        <label class="field">{p.name} (minutes) <input type="number" min="0" max="10080" step="1" bind:value={timeouts[p.id]} /></label>
         <button class="btn" type="submit">Save</button>
       </form>
     {:else}

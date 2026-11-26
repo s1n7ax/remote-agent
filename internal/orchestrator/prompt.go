@@ -198,11 +198,15 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 		line("")
 		line("## Trigger")
 		line("")
-		kind := "ci_failed"
-		if strings.Contains(t.StatusNote, "conflict") {
-			kind = "conflict"
-		} else if strings.Contains(t.StatusNote, "verification") {
-			kind = "verify_failed"
+		kind := t.FixTrigger
+		switch {
+		case kind != "":
+		case strings.Contains(t.StatusNote, "conflict"):
+			kind = fixConflict
+		case strings.Contains(t.StatusNote, "verification"):
+			kind = fixVerifyFailed
+		default:
+			kind = fixCIFailed
 		}
 		line("- kind: %s", kind)
 		if t.PR != 0 {
@@ -220,7 +224,7 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 			}
 		}
 		line("- fix round: %d of %d", t.FixRounds, maxFixRounds)
-		if kind == "verify_failed" && tc.Proof != nil {
+		if kind == fixVerifyFailed && tc.Proof != nil {
 			line("")
 			line("Last verification report (FAIL):")
 			line("")

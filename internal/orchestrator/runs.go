@@ -49,6 +49,8 @@ type activeRun struct {
 	capped        string // reason, when a spend cap ended the run
 	limit         *agent.Limit
 	timeout       *time.Timer
+	deadline      time.Time     // when the timeout fires, while running
+	left          time.Duration // time left on the timeout, while paused
 	timedOut      time.Duration // the limit, when the run timed out
 }
 
@@ -160,6 +162,11 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		return false, fmt.Errorf("start %s: %w", kind, err)
 	}
 	ar.sess = sess
+	limit := o.runTimeout(p)
+	ar.mu.Lock()
+	ar.deadline = time.Now().Add(limit)
+	ar.timeout = time.AfterFunc(limit, func() { o.timeOut(context.WithoutCancel(ctx), ar, limit) })
+	ar.mu.Unlock()
 
 	startedAt := o.now()
 	ar.run.StartedAt = &startedAt
@@ -177,10 +184,6 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	}
 	ar.ticket = t
 	o.event(ctx, ar, domain.EventSystem, fmt.Sprintf("started %s stage with %s %s %s", t.Stage, kind, t.Model, t.Effort))
-	limit := o.runTimeout(p)
-	ar.mu.Lock()
-	ar.timeout = time.AfterFunc(limit, func() { o.timeOut(context.WithoutCancel(ctx), ar, limit) })
-	ar.mu.Unlock()
 
 	o.wg.Add(1)
 	go func() {
@@ -200,13 +203,13 @@ func (o *Orchestrator) runTimeout(p domain.Project) time.Duration {
 }
 
 // timeOut stops a run that reached its time limit. Time the user keeps a
-// run paused does not count: a paused run is checked again a minute later.
+// run paused does not count: pausing stops the timer and resuming restarts
+// it with the time that was left (see pauseTimeout).
 func (o *Orchestrator) timeOut(ctx context.Context, ar *activeRun, limit time.Duration) {
 	ar.mu.Lock()
 	if ar.paused {
-		ar.timeout.Reset(time.Minute)
 		ar.mu.Unlock()
-		return
+		return // fired as the run paused; resuming restarts it
 	}
 	ar.timedOut = limit
 	ar.mu.Unlock()
@@ -599,6 +602,9 @@ func (o *Orchestrator) signal(ctx context.Context, ticketID int64, sig syscall.S
 		return fmt.Errorf("signal run: %w", err)
 	}
 	ar.mu.Lock()
+	if ar.paused != pause {
+		ar.pauseTimeout(pause)
+	}
 	ar.paused = pause
 	ar.mu.Unlock()
 	if pause {
@@ -610,6 +616,23 @@ func (o *Orchestrator) signal(ctx context.Context, ticketID int64, sig syscall.S
 		o.event(ctx, ar, domain.EventSystem, "resumed")
 	}
 	return o.st.UpdateRun(ctx, ar.run)
+}
+
+// pauseTimeout stops the run's timeout when it pauses and restarts it with
+// the time that was left when it resumes. Callers hold ar.mu.
+func (ar *activeRun) pauseTimeout(pause bool) {
+	if ar.timeout == nil {
+		return
+	}
+	if pause {
+		ar.left = 0
+		if ar.timeout.Stop() {
+			ar.left = time.Until(ar.deadline)
+		}
+		return
+	}
+	ar.deadline = time.Now().Add(ar.left)
+	ar.timeout.Reset(ar.left)
 }
 
 // Stop ends a ticket's run; the ticket returns to the backlog.

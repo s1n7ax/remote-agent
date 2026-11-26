@@ -165,7 +165,7 @@ func (o *Orchestrator) advance(ctx context.Context, t *domain.Ticket, questions,
 		case proof.Verdict == "PASS":
 			markReady(t, startSHA, verify, notify)
 		default:
-			toFix(t, "verification failed", notify)
+			toFix(t, fixVerifyFailed, "verification failed", notify)
 		}
 	case domain.StageJob:
 		t.Status = domain.StatusDone
@@ -176,8 +176,15 @@ func (o *Orchestrator) advance(ctx context.Context, t *domain.Ticket, questions,
 	}
 }
 
+// Fix triggers: why a ticket went to fix, kept for the fix run's prompt.
+const (
+	fixCIFailed     = "ci_failed"
+	fixConflict     = "conflict"
+	fixVerifyFailed = "verify_failed"
+)
+
 // toFix sends a ticket to a fix run, or fails it when it is out of rounds.
-func toFix(t *domain.Ticket, why string, notify notifyFunc) {
+func toFix(t *domain.Ticket, trigger, why string, notify notifyFunc) {
 	if t.FixRounds >= maxFixRounds {
 		t.Status = domain.StatusFailed
 		t.StatusNote = fmt.Sprintf("%s after %d fix rounds", why, t.FixRounds)
@@ -185,6 +192,7 @@ func toFix(t *domain.Ticket, why string, notify notifyFunc) {
 		return
 	}
 	t.FixRounds++
+	t.FixTrigger = trigger
 	t.Stage, t.Status = domain.StageFix, domain.StatusReady
 	t.StatusNote = why
 }
@@ -248,10 +256,10 @@ func markReady(t *domain.Ticket, tested string, v verifyResult, _ notifyFunc) {
 const unfinishedPrefix = "the run ended without "
 
 // missingOutcome names the tool calls the run still owes its stage, or ""
-// when it delivered: a question round, its stage's outcome tool, or
-// stage_done. Callers hold ar.mu.
+// when it delivered: a question round, or its stage's outcome tool —
+// stage_done for explore and job, which have no other. Callers hold ar.mu.
 func (ar *activeRun) missingOutcome() string {
-	if ar.questions || ar.stageDone {
+	if ar.questions {
 		return ""
 	}
 	switch ar.run.Stage {
@@ -272,6 +280,9 @@ func (ar *activeRun) missingOutcome() string {
 		return "a verdict (submit_proof)"
 	case domain.StageDesign:
 		return "the design round (submit_questions)"
+	}
+	if ar.stageDone {
+		return ""
 	}
 	return "stage_done"
 }

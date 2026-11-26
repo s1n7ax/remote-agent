@@ -94,12 +94,12 @@ func (o *Orchestrator) onPull(ctx context.Context, t *domain.Ticket, pr PullStat
 		t.VerifiedSHA = ""
 		return true
 	case pr.MergeableState == "dirty":
-		toFix(t, "merge conflict with the base branch", notify)
+		toFix(t, fixConflict, "merge conflict with the base branch", notify)
 		return true
 	case pr.CI == "failure" && !checksPending(pr):
 		// A fix run starts only once every check has finished, so it sees
 		// all of the failures at once.
-		toFix(t, "CI failed", notify)
+		toFix(t, fixCIFailed, "CI failed", notify)
 		return true
 	case pr.CI == "success" || pr.CI == "none":
 		if t.Status == domain.StatusInReview {

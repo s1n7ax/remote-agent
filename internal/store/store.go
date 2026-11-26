@@ -48,6 +48,7 @@ func Open(path string) (*Store, error) {
 // CREATE TABLE IF NOT EXISTS does not add them to an existing database.
 var addedColumns = []struct{ table, column, def string }{
 	{"projects", "run_timeout_minutes", "INTEGER NOT NULL DEFAULT 0"},
+	{"tickets", "fix_trigger", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // addColumns adds every column of addedColumns that its table lacks.

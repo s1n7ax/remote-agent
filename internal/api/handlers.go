@@ -172,6 +172,9 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) error {
 	return created(w, p)
 }
 
+// maxRunTimeoutMinutes caps a project's run time limit at a week.
+const maxRunTimeoutMinutes = 7 * 24 * 60
+
 func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -192,8 +195,8 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	if in.RunTimeout != nil && *in.RunTimeout < 0 {
-		return badRequest("runTimeoutMinutes must be 0 (the default) or more")
+	if in.RunTimeout != nil && (*in.RunTimeout < 0 || *in.RunTimeout > maxRunTimeoutMinutes) {
+		return badRequest(fmt.Sprintf("runTimeoutMinutes must be 0 (the default) to %d", maxRunTimeoutMinutes))
 	}
 	setIf(&p.RunTimeoutMinutes, in.RunTimeout)
 	setIf(&p.Name, in.Name)

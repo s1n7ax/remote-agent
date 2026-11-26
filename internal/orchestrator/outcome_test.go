@@ -125,3 +125,73 @@ func TestProjectRunTimeoutOverridesDefault(t *testing.T) {
 		t.Fatalf("project = %s", got)
 	}
 }
+
+// stage_done alone does not finish a build: without its PR the run is
+// continued, not failed.
+func TestBuildStageDoneWithoutPRIsContinued(t *testing.T) {
+	h := newHarness(t)
+	tk := h.newTicket(domain.Ticket{Stage: domain.StageBuild})
+	r := h.nextRun()
+	if err := h.o.ToolStageDone(h.ctx, r.ID(), "built"); err != nil {
+		t.Fatal(err)
+	}
+	r.Sess.Finish(agent.Event{})
+	r2 := h.nextRun()
+	if r2.Info.Stage != domain.StageBuild || !strings.Contains(r2.Spec.Prompt, "## Why the last run stopped") {
+		t.Fatalf("not continued: stage %s\n%s", r2.Info.Stage, r2.Spec.Prompt)
+	}
+	if got := h.ticket(tk.ID); got.Status != domain.StatusWorking {
+		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+// A continued fix run keeps its trigger: a verify failure stays one.
+func TestContinuedFixKeepsItsTrigger(t *testing.T) {
+	h := newHarness(t)
+	h.newTicket(domain.Ticket{Stage: domain.StageFix, FixTrigger: fixVerifyFailed, StatusNote: "verification failed"})
+	r := h.nextRun()
+	r.Sess.Finish(agent.Event{})
+	r2 := h.nextRun()
+	if !strings.Contains(r2.Spec.Prompt, "- kind: verify_failed") {
+		t.Fatalf("continued fix lost its trigger:\n%s", r2.Spec.Prompt)
+	}
+}
+
+// Time paused does not count toward the run's limit.
+func TestPausedTimeDoesNotCount(t *testing.T) {
+	h := newHarness(t, func(_ *harness, o *Options) { o.RunTimeout = 300 * time.Millisecond })
+	h.runner.withProcess = true
+	tk := h.newTicket(domain.Ticket{Stage: domain.StageExplore})
+	r := h.nextRun()
+	h.waitState(tk.ID, domain.StatusWorking, domain.StageExplore)
+	if err := h.o.Pause(h.ctx, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := h.o.Resume(h.ctx, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if r.Sess.isEnded() {
+		t.Fatal("paused time counted toward the limit")
+	}
+	got := h.waitState(tk.ID, domain.StatusFailed, domain.StageExplore)
+	if !strings.HasPrefix(got.StatusNote, "timed out after") {
+		t.Fatalf("note = %q", got.StatusNote)
+	}
+}
+
+// Only a conversation that was cut short is continued; one that failed
+// with an error starts fresh.
+func TestLeftUnfinished(t *testing.T) {
+	for err, want := range map[string]bool{
+		unfinishedPrefix + "stage_done":                      true,
+		"timed out after 120 minutes":                        true,
+		"interrupted by a restart":                           true,
+		"claude exited without a result: prompt is too long": false,
+	} {
+		if got := leftUnfinished(err); got != want {
+			t.Errorf("leftUnfinished(%q) = %v, want %v", err, got, want)
+		}
+	}
+}

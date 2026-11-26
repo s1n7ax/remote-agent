@@ -98,11 +98,14 @@ type Ticket struct {
 	StartAt     *time.Time `json:"startAt,omitempty"`
 	WaitUntil   *time.Time `json:"waitUntil,omitempty"`
 	FixRounds   int        `json:"fixRounds"`
-	SpendUSD    float64    `json:"spendUsd"`
-	SpendCapUSD float64    `json:"spendCapUsd"`
-	JobPrompt   string     `json:"jobPrompt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	// FixTrigger says why the ticket went to fix: ci_failed | conflict |
+	// verify_failed.
+	FixTrigger  string    `json:"fixTrigger,omitempty"`
+	SpendUSD    float64   `json:"spendUsd"`
+	SpendCapUSD float64   `json:"spendCapUsd"`
+	JobPrompt   string    `json:"jobPrompt,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // QuestionKind is how a question is answered.

@@ -508,8 +508,14 @@ func TestBuildWithoutPRFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Sess.Finish(agent.Event{})
+	// Continued once, then failed.
+	r2 := h.nextRun()
+	if err := h.o.ToolStageDone(h.ctx, r2.ID(), "done?"); err != nil {
+		t.Fatal(err)
+	}
+	r2.Sess.Finish(agent.Event{})
 	got := h.waitTicket(tk.ID, "failed", func(t domain.Ticket) bool { return t.Status == domain.StatusFailed })
-	if !strings.Contains(got.StatusNote, "without opening a pull request") {
+	if !strings.Contains(got.StatusNote, "without opening the pull request") || !strings.Contains(got.StatusNote, "twice") {
 		t.Fatalf("note = %q", got.StatusNote)
 	}
 }
