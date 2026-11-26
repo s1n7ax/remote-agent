@@ -153,7 +153,7 @@ func (o *Orchestrator) resumeSession(ctx context.Context, ar *activeRun, home *o
 // was cut short (no outcome, a timeout, a restart) rather than broken: only
 // such a conversation is worth continuing.
 func leftUnfinished(runErr string) bool {
-	for _, prefix := range []string{unfinishedPrefix, "timed out after", "interrupted by"} {
+	for _, prefix := range []string{unfinishedPrefix, timedOutPrefix, interruptedPrefix} {
 		if strings.HasPrefix(runErr, prefix) {
 			return true
 		}

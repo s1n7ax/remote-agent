@@ -188,7 +188,7 @@ func (o *Orchestrator) recover(ctx context.Context) error {
 	}
 	for _, run := range append(runs, paused...) {
 		run.Status = domain.RunFailed
-		run.Error = "interrupted by a restart"
+		run.Error = interruptedPrefix + "a restart"
 		fin := o.now()
 		run.FinishedAt = &fin
 		if err := o.st.UpdateRun(ctx, run); err != nil {

@@ -213,17 +213,21 @@ func (o *Orchestrator) timeOut(ctx context.Context, ar *activeRun, limit time.Du
 	}
 	ar.timedOut = limit
 	ar.mu.Unlock()
-	o.event(ctx, ar, domain.EventSystem, "timed out after "+minutes(limit))
+	o.event(ctx, ar, domain.EventSystem, timedOutAfter(limit))
 	_ = ar.sess.Stop()
 }
 
-// minutes formats d as a whole number of minutes.
-func minutes(d time.Duration) string {
+// timedOutPrefix starts the error of a run stopped at its time limit.
+const timedOutPrefix = "timed out after "
+
+// timedOutAfter is the error of a run stopped at time limit d, in whole
+// minutes.
+func timedOutAfter(d time.Duration) string {
 	m := int(d.Round(time.Minute) / time.Minute)
 	if m == 1 {
-		return "1 minute"
+		return timedOutPrefix + "1 minute"
 	}
-	return fmt.Sprintf("%d minutes", m)
+	return fmt.Sprintf("%s%d minutes", timedOutPrefix, m)
 }
 
 // agentCredentials picks the account and secrets a run of kind needs. Not

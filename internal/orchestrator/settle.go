@@ -36,11 +36,11 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 	var verify verifyResult
 	switch {
 	case shutdown:
-		o.finishRunRecord(ctx, ar, domain.RunFailed, "interrupted by a shutdown")
+		o.finishRunRecord(ctx, ar, domain.RunFailed, interruptedPrefix+"a shutdown")
 	case stop:
 		o.finishRunRecord(ctx, ar, domain.RunStopped, "")
 	case timedOut > 0:
-		o.finishRunRecord(ctx, ar, domain.RunFailed, "timed out after "+minutes(timedOut))
+		o.finishRunRecord(ctx, ar, domain.RunFailed, timedOutAfter(timedOut))
 	case limit != nil:
 		o.finishRunRecord(ctx, ar, domain.RunLimited, "usage limit")
 	case capped != "":
@@ -85,7 +85,7 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 		t.StatusNote = "stopped"
 	case timedOut > 0:
 		t.Status = domain.StatusFailed
-		t.StatusNote = "timed out after " + minutes(timedOut)
+		t.StatusNote = timedOutAfter(timedOut)
 		queue(domain.NotifyRunFailed, t, "Run "+t.StatusNote)
 	case limit != nil:
 		o.afterLimit(ctx, &t, queue)
@@ -254,6 +254,10 @@ func markReady(t *domain.Ticket, tested string, v verifyResult, _ notifyFunc) {
 // unfinishedPrefix starts the error of a run that ended without its stage's
 // outcome.
 const unfinishedPrefix = "the run ended without "
+
+// interruptedPrefix starts the error of a run cut off by a shutdown or a
+// restart.
+const interruptedPrefix = "interrupted by "
 
 // missingOutcome names the tool calls the run still owes its stage, or ""
 // when it delivered: a question round, or its stage's outcome tool —
