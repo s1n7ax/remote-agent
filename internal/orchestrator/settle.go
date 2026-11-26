@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/s1n7ax/remote-agent/internal/agent"
@@ -18,13 +19,15 @@ type notifyFunc func(ev domain.NotifyEvent, t domain.Ticket, body string)
 // settle records how a run ended and moves its ticket to the next state.
 func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Event) {
 	ar.mu.Lock()
-	stop, shutdown, capped, limit := ar.stopRequested, ar.shutdown, ar.capped, ar.limit
-	questions, prOpened, proof, summary, stageDone := ar.questions, ar.prOpened, ar.proof, ar.summary, ar.stageDone
+	stop, shutdown, capped, limit, timedOut := ar.stopRequested, ar.shutdown, ar.capped, ar.limit, ar.timedOut
+	questions, prOpened, proof, summary := ar.questions, ar.prOpened, ar.proof, ar.summary
+	missing := ar.missingOutcome()
 	ar.mu.Unlock()
 	if summary == "" {
 		summary = final.Summary
 	}
 	ar.run.Summary = summary
+	unfinished := unfinishedPrefix + missing
 
 	// The run record and the GitHub calls come first, outside tmu. The
 	// ticket's next state is then decided on, and saved over, its current
@@ -36,6 +39,8 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 		o.finishRunRecord(ctx, ar, domain.RunFailed, "interrupted by a shutdown")
 	case stop:
 		o.finishRunRecord(ctx, ar, domain.RunStopped, "")
+	case timedOut > 0:
+		o.finishRunRecord(ctx, ar, domain.RunFailed, "timed out after "+minutes(timedOut))
 	case limit != nil:
 		o.finishRunRecord(ctx, ar, domain.RunLimited, "usage limit")
 	case capped != "":
@@ -46,8 +51,8 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 		return
 	case final.Err != nil:
 		o.finishRunRecord(ctx, ar, domain.RunFailed, final.Err.Error())
-	case !stageDone && !questions:
-		o.finishRunRecord(ctx, ar, domain.RunFailed, "the run ended without stage_done")
+	case missing != "":
+		o.finishRunRecord(ctx, ar, domain.RunFailed, unfinished)
 	default:
 		o.finishRunRecord(ctx, ar, domain.RunSucceeded, "")
 		if !questions && ar.run.Stage == domain.StageVerify && proof != nil && proof.Verdict == "PASS" {
@@ -78,22 +83,29 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 	case stop:
 		t.Status = domain.StatusBacklog
 		t.StatusNote = "stopped"
+	case timedOut > 0:
+		t.Status = domain.StatusFailed
+		t.StatusNote = "timed out after " + minutes(timedOut)
+		queue(domain.NotifyRunFailed, t, "Run "+t.StatusNote)
 	case limit != nil:
 		o.afterLimit(ctx, &t, queue)
 	case final.Err != nil:
 		t.Status = domain.StatusFailed
 		t.StatusNote = final.Err.Error()
 		queue(domain.NotifyRunFailed, t, "Run failed: "+final.Err.Error())
-	case !stageDone && !questions:
-		// The agent stopped without finishing its stage: resume it once,
-		// then give up.
+	case missing != "":
+		// The agent stopped without its stage's outcome: continue its
+		// conversation once, then give up and show where it stopped.
 		if o.endedUnfinishedBefore(ctx, t) {
 			t.Status = domain.StatusFailed
-			t.StatusNote = "the agent ended the stage twice without finishing it"
+			t.StatusNote = unfinished + ", twice"
+			if last := lastWords(final.Summary); last != "" {
+				t.StatusNote += ". The agent's last message: " + last
+			}
 			queue(domain.NotifyRunFailed, t, t.StatusNote)
 		} else {
 			t.Status = domain.StatusReady
-			t.StatusNote = "resuming a stage the agent did not finish"
+			t.StatusNote = "continuing: " + unfinished
 		}
 	default:
 		o.advance(ctx, &t, questions, prOpened, proof, ar.startSHA, verify, queue)
@@ -209,8 +221,8 @@ func (o *Orchestrator) checkVerified(ctx context.Context, ar *activeRun) verifyR
 
 // markReady records the commit a passing verify run tested as verified; the
 // final CI wait then moves the ticket to in_review. When the PR head moved
-// during the run, the ticket goes back to verify: the next run checks the
-// new head out before it starts.
+// during the run, the ticket waits for CI on the new head, which is tested
+// once it is green.
 func markReady(t *domain.Ticket, tested string, v verifyResult, _ notifyFunc) {
 	t.VerifiedSHA = ""
 	switch {
@@ -225,19 +237,61 @@ func markReady(t *domain.Ticket, tested string, v verifyResult, _ notifyFunc) {
 		t.StatusNote = "verified; waiting for the final CI run"
 		t.VerifiedSHA = tested
 	default:
-		t.Stage, t.Status = domain.StageVerify, domain.StatusReady
-		t.StatusNote = fmt.Sprintf("the PR head moved during verification (tested %s, head is %s); verifying again",
+		t.Stage, t.Status = domain.StageCI, domain.StatusWaiting
+		t.StatusNote = fmt.Sprintf("the PR head moved during verification (tested %s, head is %s); waiting for CI on it",
 			shortSHA(tested), shortSHA(v.pr.HeadSHA))
 	}
 }
 
+// unfinishedPrefix starts the error of a run that ended without its stage's
+// outcome.
+const unfinishedPrefix = "the run ended without "
+
+// missingOutcome names the tool calls the run still owes its stage, or ""
+// when it delivered: a question round, its stage's outcome tool, or
+// stage_done. Callers hold ar.mu.
+func (ar *activeRun) missingOutcome() string {
+	if ar.questions || ar.stageDone {
+		return ""
+	}
+	switch ar.run.Stage {
+	case domain.StageBuild:
+		if ar.prOpened || (ar.pushed && ar.ticket.PR != 0) {
+			return ""
+		}
+		return "opening the pull request (push_branch, then open_pr)"
+	case domain.StageFix:
+		if ar.pushed {
+			return ""
+		}
+		return "pushing the fix (push_branch)"
+	case domain.StageVerify:
+		if ar.proof != nil {
+			return ""
+		}
+		return "a verdict (submit_proof)"
+	case domain.StageDesign:
+		return "the design round (submit_questions)"
+	}
+	return "stage_done"
+}
+
+// lastWords shortens an agent's last message for a status note.
+func lastWords(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > 300 {
+		s = string(r[:300]) + "…"
+	}
+	return s
+}
+
 // endedUnfinishedBefore reports whether the run before the latest one of the
-// ticket's stage also ended without stage_done.
+// ticket's stage also ended without its stage's outcome.
 func (o *Orchestrator) endedUnfinishedBefore(ctx context.Context, t domain.Ticket) bool {
 	runs, err := o.st.TicketRuns(ctx, t.ID)
 	if err != nil || len(runs) < 2 {
 		return false
 	}
 	prev := runs[1]
-	return prev.Stage == t.Stage && prev.Status == domain.RunFailed && prev.Error == "the run ended without stage_done"
+	return prev.Stage == t.Stage && prev.Status == domain.RunFailed && strings.HasPrefix(prev.Error, unfinishedPrefix)
 }

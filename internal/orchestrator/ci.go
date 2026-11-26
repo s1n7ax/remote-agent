@@ -87,15 +87,18 @@ func (o *Orchestrator) onPull(ctx context.Context, t *domain.Ticket, pr PullStat
 		t.StatusNote = "the PR was closed without merging"
 		return true
 	case t.Status == domain.StatusInReview && pr.HeadSHA != t.VerifiedSHA:
-		// Review (and Merge) are for the verified commit only.
-		t.Stage, t.Status = domain.StageVerify, domain.StatusReady
-		t.StatusNote = "the PR head moved after verification; verifying " + shortSHA(pr.HeadSHA)
+		// Review (and Merge) are for the verified commit only. The new
+		// head is tested once its CI is green.
+		t.Stage, t.Status = domain.StageCI, domain.StatusWaiting
+		t.StatusNote = "the PR head moved after verification; waiting for CI on " + shortSHA(pr.HeadSHA)
 		t.VerifiedSHA = ""
 		return true
 	case pr.MergeableState == "dirty":
 		toFix(t, "merge conflict with the base branch", notify)
 		return true
-	case pr.CI == "failure":
+	case pr.CI == "failure" && !checksPending(pr):
+		// A fix run starts only once every check has finished, so it sees
+		// all of the failures at once.
 		toFix(t, "CI failed", notify)
 		return true
 	case pr.CI == "success" || pr.CI == "none":
@@ -108,9 +111,19 @@ func (o *Orchestrator) onPull(ctx context.Context, t *domain.Ticket, pr PullStat
 			o.notify(ctx, domain.NotifyPRReady, *t, "PR is green and ready for your review")
 			return true
 		}
-		t.Stage, t.Status = domain.StageVerify, domain.StatusReady
-		t.StatusNote = "CI is green; verifying"
+		t.Stage, t.Status = domain.StageVerify, domain.StatusReadyForTesting
+		t.StatusNote = "CI is green; ready for testing"
 		return true
 	}
 	return false // pending
+}
+
+// checksPending reports whether any check on the PR head is still running.
+func checksPending(pr PullState) bool {
+	for _, c := range pr.Checks {
+		if c.Pending {
+			return true
+		}
+	}
+	return false
 }

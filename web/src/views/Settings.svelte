@@ -7,7 +7,7 @@
   import { clock, errorText, relative, usd } from '../lib/format';
   import { enablePush, pushEnabled, pushSupported } from '../lib/push';
   import { applyTheme, getTheme, type Theme } from '../lib/theme';
-  import { NOTIFY_LABEL, type Account, type NotificationPrefs, type NotifyEvent } from '../lib/types';
+  import { NOTIFY_LABEL, type Account, type NotificationPrefs, type NotifyEvent, type Project } from '../lib/types';
 
   const s = $derived(app.state!);
   // Writable deriveds: follow the server state, overridable by local edits.
@@ -21,6 +21,8 @@
   let device = $state<'unknown' | 'on' | 'off' | 'unsupported'>('unknown');
   let deviceBusy = $state(false);
   let theme = $state<Theme>(getTheme());
+  // Per-project run time limits in minutes; 0 uses the server default.
+  let timeouts = $derived(Object.fromEntries(s.projects.map((p) => [p.id, p.runTimeoutMinutes])) as Record<number, number>);
 
   onMount(() => {
     api
@@ -77,6 +79,13 @@
       'Limits saved',
     );
     if (res && app.state) app.state.settings = res;
+  }
+
+  async function saveTimeout(e: SubmitEvent, p: Project) {
+    e.preventDefault();
+    const minutes = Math.max(0, Math.round(timeouts[p.id] || 0));
+    const res = await app.attempt(() => api.updateProject(p.id, { runTimeoutMinutes: minutes }), `Time limit saved for ${p.name}`);
+    if (res) await app.load();
   }
 
   const isOn = (ev: NotifyEvent) => prefs?.prefs?.[ev] ?? s.notifyEvents?.[ev] ?? false;
@@ -167,6 +176,19 @@
     <p class="muted small">Spend caps apply to Pi; reaching one pauses the run and asks on the card. 0 means no cap. The per-ticket cap is the default for new tickets.</p>
     <button class="btn" type="submit">Save limits</button>
   </form>
+
+  <section class="panel">
+    <h2>Run time limit</h2>
+    <p class="muted small">A run that takes longer is stopped, and its ticket fails with the reason; Retry continues it. 0 uses the default of {s.settings.runTimeoutMinutes} minutes, set in the server configuration.</p>
+    {#each s.projects as p (p.id)}
+      <form class="timeout" onsubmit={(e) => saveTimeout(e, p)}>
+        <label class="field">{p.name} (minutes) <input type="number" min="0" step="5" bind:value={timeouts[p.id]} /></label>
+        <button class="btn" type="submit">Save</button>
+      </form>
+    {:else}
+      <p class="muted small">No projects yet.</p>
+    {/each}
+  </section>
 
   <section class="panel">
     <h2>Notifications</h2>
@@ -294,6 +316,16 @@
   .grid3 {
     display: grid;
     gap: 10px;
+  }
+  .timeout {
+    display: flex;
+    align-items: end;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .timeout .field {
+    flex: 1;
+    min-width: 0;
   }
   @media (min-width: 600px) {
     .link {

@@ -42,6 +42,8 @@ type Server struct {
 	OpenRouterConfigured func() bool
 	// MaxParallel reads/writes the parallel-run limit.
 	MaxParallel func() int
+	// RunTimeoutMinutes reads the default run time limit.
+	RunTimeoutMinutes func() int
 }
 
 // Handler returns the HTTP handler.

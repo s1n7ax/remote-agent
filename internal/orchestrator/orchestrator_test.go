@@ -447,8 +447,8 @@ func TestGreenCIOnUnverifiedHeadReverifies(t *testing.T) {
 	}
 	h.gh.update(n, func(p *PullState) { p.Draft = false })
 	h.gh.setCI(n, "success")
-	got := h.waitState(tk.ID, domain.StatusReady, domain.StageVerify)
-	if got.StatusNote != "CI is green; verifying" {
+	got := h.waitState(tk.ID, domain.StatusReadyForTesting, domain.StageVerify)
+	if got.StatusNote != "CI is green; ready for testing" {
 		t.Fatalf("note = %q", got.StatusNote)
 	}
 }
@@ -575,8 +575,10 @@ func TestOnlyUserMerges(t *testing.T) {
 	if got.Title != "Dark mode" || got.Requirement == "" {
 		t.Fatalf("requirement tool did not apply: %+v", got)
 	}
+	h.o.Drain(true)
 	h.gh.setCI(got.PR, "success") // nothing in the flow merges on green either
-	h.waitState(tk.ID, domain.StatusReady, domain.StageVerify)
+	h.waitState(tk.ID, domain.StatusReadyForTesting, domain.StageVerify)
+	h.o.Drain(false)
 	h.nextRun()
 	if err := h.o.Stop(ctx, tk.ID); err != nil {
 		t.Fatal(err)

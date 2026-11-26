@@ -71,8 +71,8 @@ func TestVerifyChecksOutExternalPush(t *testing.T) {
 	}
 }
 
-// A push from elsewhere during the verify run sends the ticket back to
-// verify (not to failed), and the next run verifies the new head.
+// A push from elsewhere during the verify run sends the ticket back to CI
+// (not to failed), and the next run verifies the new head once it is green.
 func TestExternalPushDuringVerifyReverifies(t *testing.T) {
 	h := newHarness(t)
 	tk := h.newTicket(domain.Ticket{Stage: domain.StageBuild})
@@ -84,6 +84,8 @@ func TestExternalPushDuringVerifyReverifies(t *testing.T) {
 	moved := externalPush(t, h, h.ticket(tk.ID).Branch, "bot.txt")
 	h.gh.update(n, func(p *PullState) { p.HeadSHA, p.CI = moved, "pending" })
 	passVerify(t, h, r)
+	h.waitState(tk.ID, domain.StatusWaiting, domain.StageCI)
+	h.gh.setCI(n, "success") // the new head is tested once its CI is green
 
 	r2 := h.nextRun()
 	got := h.ticket(tk.ID)

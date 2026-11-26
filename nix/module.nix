@@ -42,7 +42,12 @@ let
     mcpListen = "127.0.0.1:${toString cfg.mcpPort}";
     previewListen = "127.0.0.1:${toString cfg.previewPort}";
     dataDir = stateDir;
-    inherit (cfg) maxParallelRuns sandboxPaths browserMcpServers;
+    inherit (cfg)
+      maxParallelRuns
+      runTimeoutMinutes
+      sandboxPaths
+      browserMcpServers
+      ;
     githubTokenFile = "${credDir}/github-token";
     claudeBin = lib.getExe cfg.claudePackage;
     piBin = lib.getExe cfg.piPackage;
@@ -140,6 +145,12 @@ in
       type = types.ints.positive;
       default = 2;
       description = "Maximum number of agent runs at once.";
+    };
+
+    runTimeoutMinutes = mkOption {
+      type = types.ints.positive;
+      default = 120;
+      description = "Minutes an agent run may take before it is stopped. A project can set its own limit in the app.";
     };
 
     githubTokenFile = mkOption {

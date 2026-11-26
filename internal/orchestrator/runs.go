@@ -37,6 +37,7 @@ type activeRun struct {
 	// Set by MCP tool calls during the run.
 	questions bool
 	prOpened  bool
+	pushed    bool
 	proof     *domain.Proof
 	stageDone bool
 	summary   string
@@ -47,6 +48,8 @@ type activeRun struct {
 	paused        bool
 	capped        string // reason, when a spend cap ended the run
 	limit         *agent.Limit
+	timeout       *time.Timer
+	timedOut      time.Duration // the limit, when the run timed out
 }
 
 // usesBrowser reports whether a stage may drive a browser (and so takes the
@@ -174,6 +177,10 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	}
 	ar.ticket = t
 	o.event(ctx, ar, domain.EventSystem, fmt.Sprintf("started %s stage with %s %s %s", t.Stage, kind, t.Model, t.Effort))
+	limit := o.runTimeout(p)
+	ar.mu.Lock()
+	ar.timeout = time.AfterFunc(limit, func() { o.timeOut(context.WithoutCancel(ctx), ar, limit) })
+	ar.mu.Unlock()
 
 	o.wg.Add(1)
 	go func() {
@@ -182,6 +189,38 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		o.watch(context.WithoutCancel(ctx), ar)
 	}()
 	return true, nil
+}
+
+// runTimeout is how long a run of project p may take.
+func (o *Orchestrator) runTimeout(p domain.Project) time.Duration {
+	if p.RunTimeoutMinutes > 0 {
+		return time.Duration(p.RunTimeoutMinutes) * time.Minute
+	}
+	return o.runLimit
+}
+
+// timeOut stops a run that reached its time limit. Time the user keeps a
+// run paused does not count: a paused run is checked again a minute later.
+func (o *Orchestrator) timeOut(ctx context.Context, ar *activeRun, limit time.Duration) {
+	ar.mu.Lock()
+	if ar.paused {
+		ar.timeout.Reset(time.Minute)
+		ar.mu.Unlock()
+		return
+	}
+	ar.timedOut = limit
+	ar.mu.Unlock()
+	o.event(ctx, ar, domain.EventSystem, "timed out after "+minutes(limit))
+	_ = ar.sess.Stop()
+}
+
+// minutes formats d as a whole number of minutes.
+func minutes(d time.Duration) string {
+	m := int(d.Round(time.Minute) / time.Minute)
+	if m == 1 {
+		return "1 minute"
+	}
+	return fmt.Sprintf("%d minutes", m)
 }
 
 // agentCredentials picks the account and secrets a run of kind needs. Not
@@ -473,6 +512,11 @@ func (o *Orchestrator) watch(ctx context.Context, ar *activeRun) {
 			final = ev
 		}
 	}
+	ar.mu.Lock()
+	if ar.timeout != nil {
+		ar.timeout.Stop()
+	}
+	ar.mu.Unlock()
 	if final.Cost > 0 && ar.run.Agent != domain.AgentPi {
 		// claude reports a run total at the end.
 		ar.run.CostUSD = final.Cost

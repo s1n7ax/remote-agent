@@ -187,10 +187,15 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) error {
 		Agent         *domain.AgentKind `json:"agent"`
 		Model         *string           `json:"model"`
 		Effort        *string           `json:"effort"`
+		RunTimeout    *int              `json:"runTimeoutMinutes"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
 	}
+	if in.RunTimeout != nil && *in.RunTimeout < 0 {
+		return badRequest("runTimeoutMinutes must be 0 (the default) or more")
+	}
+	setIf(&p.RunTimeoutMinutes, in.RunTimeout)
 	setIf(&p.Name, in.Name)
 	setIf(&p.DefaultBranch, in.DefaultBranch)
 	setIf(&p.Model, in.Model)
@@ -703,6 +708,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) error {
 // Settings is the user-editable settings document.
 type Settings struct {
 	MaxParallelRuns      int      `json:"maxParallelRuns"`
+	RunTimeoutMinutes    int      `json:"runTimeoutMinutes"`
 	DailyCapUSD          float64  `json:"dailyCapUsd"`
 	TicketCapUSD         float64  `json:"ticketCapUsd"`
 	SpentTodayUSD        float64  `json:"spentTodayUsd"`
@@ -717,6 +723,9 @@ func (s *Server) settings(ctx context.Context) (Settings, error) {
 	}
 	if s.MaxParallel != nil {
 		st.MaxParallelRuns = s.MaxParallel()
+	}
+	if s.RunTimeoutMinutes != nil {
+		st.RunTimeoutMinutes = s.RunTimeoutMinutes()
 	}
 	if s.OpenRouterConfigured != nil {
 		st.OpenRouterConfigured = s.OpenRouterConfigured()

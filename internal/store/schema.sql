@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS projects (
 	agent TEXT NOT NULL DEFAULT 'claude',
 	model TEXT NOT NULL DEFAULT '',
 	effort TEXT NOT NULL DEFAULT '',
+	run_timeout_minutes INTEGER NOT NULL DEFAULT 0,
 	created_at TIMESTAMP NOT NULL
 );
 

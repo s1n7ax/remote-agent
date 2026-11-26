@@ -7,6 +7,7 @@ export type Status =
   | 'ready'
   | 'working'
   | 'waiting'
+  | 'ready_for_testing'
   | 'in_review'
   | 'done'
   | 'failed';
@@ -17,6 +18,7 @@ export const STATUSES: Status[] = [
   'ready',
   'working',
   'waiting',
+  'ready_for_testing',
   'in_review',
   'done',
   'failed',
@@ -28,6 +30,7 @@ export const STATUS_LABEL: Record<Status, string> = {
   ready: 'Ready',
   working: 'Working',
   waiting: 'Waiting',
+  ready_for_testing: 'Ready for testing',
   in_review: 'In review',
   done: 'Done',
   failed: 'Failed',
@@ -45,6 +48,8 @@ export interface Project {
   agent: AgentKind;
   model: string;
   effort: string;
+  /** Minutes a run may take; 0 uses the server default. */
+  runTimeoutMinutes: number;
   createdAt: string;
 }
 
@@ -252,6 +257,8 @@ export const NOTIFY_LABEL: Record<NotifyEvent, string> = {
 /** GET/PUT /api/settings. */
 export interface Settings {
   maxParallelRuns: number;
+  /** Default minutes a run may take, from the server configuration. */
+  runTimeoutMinutes: number;
   dailyCapUsd: number;
   ticketCapUsd: number;
   spentTodayUsd: number;
@@ -381,6 +388,7 @@ export interface ProjectInput {
   agent: AgentKind;
   model: string;
   effort: string;
+  runTimeoutMinutes?: number;
 }
 
 export interface TicketInput {
