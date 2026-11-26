@@ -30,7 +30,7 @@ _Avoid_: column, state
 ## Questions
 
 **Round**:
-One question tree posted on a ticket at once, with the user's answers; the ticket advances when every visible question is answered.
+One question tree posted on a ticket at once, with the user's answers; it completes, and the ticket advances, only when the user submits it with every visible question answered.
 _Avoid_: question batch, survey
 
 **Question tree**:
