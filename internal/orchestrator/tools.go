@@ -431,6 +431,9 @@ func (o *Orchestrator) ToolPushBranch(ctx context.Context, runID int64) (string,
 	if err := o.pushBranch(ctx, ar, branch); err != nil {
 		return "", err
 	}
+	ar.mu.Lock()
+	ar.pushed = true
+	ar.mu.Unlock()
 	o.event(ctx, ar, domain.EventSystem, "pushed "+branch)
 	if t.PR != 0 {
 		o.RecheckCI(ar.ticket.ID)
@@ -615,7 +618,8 @@ func (o *Orchestrator) ToolComment(ctx context.Context, runID int64, body string
 	return o.gh.UpsertComment(ctx, ar.project.Repo, number, "", body)
 }
 
-// ToolStageDone records the run's summary; the run should exit after it.
+// ToolStageDone records the run's summary. A stage whose outcome tool was
+// called is finished without it.
 func (o *Orchestrator) ToolStageDone(ctx context.Context, runID int64, summary string) error {
 	ar, err := o.runByID(runID)
 	if err != nil {

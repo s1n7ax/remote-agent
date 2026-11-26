@@ -37,7 +37,36 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate db: %w", err)
 	}
+	if err := addColumns(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate db: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// addedColumns are columns added to a table after it was first created;
+// CREATE TABLE IF NOT EXISTS does not add them to an existing database.
+var addedColumns = []struct{ table, column, def string }{
+	{"projects", "run_timeout_minutes", "INTEGER NOT NULL DEFAULT 0"},
+	{"tickets", "fix_trigger", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// addColumns adds every column of addedColumns that its table lacks.
+func addColumns(db *sql.DB) error {
+	for _, c := range addedColumns {
+		var n int
+		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.column).Scan(&n)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.column + ` ` + c.def); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close closes the database.

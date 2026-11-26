@@ -53,6 +53,9 @@ type Options struct {
 	Tick time.Duration
 	// CIPoll is how often waiting PRs are polled (default 60s).
 	CIPoll time.Duration
+	// RunTimeout stops a run that takes longer, unless its project sets
+	// its own (default: the config's runTimeoutMinutes).
+	RunTimeout time.Duration
 }
 
 // RunInfo describes a starting run to the MCP server.
@@ -77,6 +80,7 @@ type Orchestrator struct {
 	now      func() time.Time
 	tick     time.Duration
 	ciPoll   time.Duration
+	runLimit time.Duration
 	sandbox  func(rw, ro []string, workdir string) func(argv, env []string) ([]string, []string)
 	register func(RunInfo) (string, error)
 	revoke   func(string)
@@ -113,6 +117,12 @@ func New(o Options) *Orchestrator {
 	if o.CIPoll == 0 {
 		o.CIPoll = 60 * time.Second
 	}
+	if o.RunTimeout == 0 {
+		o.RunTimeout = time.Duration(o.Config.RunTimeoutMinutes) * time.Minute
+	}
+	if o.RunTimeout <= 0 {
+		o.RunTimeout = 120 * time.Minute
+	}
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
@@ -121,7 +131,7 @@ func New(o Options) *Orchestrator {
 	}
 	return &Orchestrator{
 		cfg: o.Config, st: o.Store, gh: o.GitHub, runners: o.Runners, notifier: o.Notifier,
-		skills: o.Skills, bus: o.Bus, log: o.Log, now: o.Now, tick: o.Tick, ciPoll: o.CIPoll,
+		skills: o.Skills, bus: o.Bus, log: o.Log, now: o.Now, tick: o.Tick, ciPoll: o.CIPoll, runLimit: o.RunTimeout,
 		sandbox: o.Sandbox, register: o.Register, revoke: o.Revoke,
 		kick:    make(chan struct{}, 1),
 		browser: make(chan struct{}, 1),
@@ -180,7 +190,7 @@ func (o *Orchestrator) recover(ctx context.Context) error {
 	}
 	for _, run := range append(runs, paused...) {
 		run.Status = domain.RunFailed
-		run.Error = "interrupted by a restart"
+		run.Error = interruptedPrefix + "a restart"
 		fin := o.now()
 		run.FinishedAt = &fin
 		if err := o.st.UpdateRun(ctx, run); err != nil {
@@ -257,7 +267,7 @@ func (o *Orchestrator) startReady(ctx context.Context) error {
 	if draining {
 		return nil
 	}
-	ready, err := o.st.TicketsByStatus(ctx, domain.StatusReady)
+	ready, err := o.st.TicketsByStatus(ctx, domain.StatusReady, domain.StatusReadyForTesting)
 	if err != nil {
 		return err
 	}
@@ -281,7 +291,7 @@ func (o *Orchestrator) startReady(ctx context.Context) error {
 			o.log.Error("start run", "ticket", t.ID, "err", err)
 			msg := err.Error()
 			cur, uerr := o.update(ctx, t.ID, func(c *domain.Ticket) error {
-				if c.Status != domain.StatusReady {
+				if c.Status != t.Status {
 					return errUnchanged // the user moved it meanwhile
 				}
 				c.Status = domain.StatusFailed

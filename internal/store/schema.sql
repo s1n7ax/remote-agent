@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS projects (
 	agent TEXT NOT NULL DEFAULT 'claude',
 	model TEXT NOT NULL DEFAULT '',
 	effort TEXT NOT NULL DEFAULT '',
+	run_timeout_minutes INTEGER NOT NULL DEFAULT 0,
 	created_at TIMESTAMP NOT NULL
 );
 
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 	start_at TIMESTAMP,
 	wait_until TIMESTAMP,
 	fix_rounds INTEGER NOT NULL DEFAULT 0,
+	fix_trigger TEXT NOT NULL DEFAULT '',
 	spend_usd REAL NOT NULL DEFAULT 0,
 	spend_cap_usd REAL NOT NULL DEFAULT 0,
 	job_prompt TEXT NOT NULL DEFAULT '',

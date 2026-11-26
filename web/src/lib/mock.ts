@@ -57,6 +57,7 @@ const projects: Project[] = [
     agent: 'claude',
     model: 'opus',
     effort: 'high',
+    runTimeoutMinutes: 0,
     createdAt: ago(60 * 24 * 9),
   },
   {
@@ -67,6 +68,7 @@ const projects: Project[] = [
     agent: 'pi',
     model: 'deepseek/deepseek-v4.1-flash',
     effort: 'medium',
+    runTimeoutMinutes: 240,
     createdAt: ago(60 * 24 * 30),
   },
 ];
@@ -86,6 +88,7 @@ const accounts: Account[] = [
 
 const settings = {
   maxParallelRuns: 2,
+  runTimeoutMinutes: 120,
   dailyCapUsd: 5,
   ticketCapUsd: 1.5,
   spentTodayUsd: 1.18,
@@ -631,6 +634,7 @@ on('POST', '/api/projects', (_m, b) => {
     agent: b.agent || 'claude',
     model: b.model,
     effort: b.effort,
+    runTimeoutMinutes: 0,
     createdAt: new Date().toISOString(),
   };
   projects.push(p);

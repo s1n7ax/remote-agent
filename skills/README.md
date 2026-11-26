@@ -8,13 +8,13 @@ At install the app seeds its skills repo (`/var/lib/remote-agent/skills`) from t
 
 | Skill            | What it does                                                                                                   | Invoked by                  |
 | ---------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `ship`           | The stage guide: what each stage run does, which app MCP tools it calls, and that it ends with `stage_done`. [`ship/STAGES.md`](./ship/STAGES.md) is the contract the orchestrator follows when it starts a run. | the run's first message     |
+| `ship`           | The stage guide: what each stage run does, which app MCP tool reports its outcome, and that a run never waits on anything. [`ship/STAGES.md`](./ship/STAGES.md) is the contract the orchestrator follows when it starts a run. | the run's first message     |
 | `requirement`    | Explore: builds the whole requirement question tree. Design: writes the requirement from the answers, updates `GLOSSARY.md` and `docs/adr/` in the target repo. | `ship` (explore, design)    |
 | `implement`      | Design: analyzes, spikes, drafts decisions, builds prototypes, submits the round-2 design questions. Build: implements, validates, reviews, fixes, simplifies. | `ship` (design, build)      |
-| `verify`         | Acceptance tests as the end user, before and after the change, with screenshots; renders the proof the verify stage submits. | `ship` (verify), as the `acceptance-tester` subagent |
+| `verify`         | Acceptance tests as the end user, before and after the change, with screenshots; renders the proof the verify stage submits. | `ship` (verify), in the verify run |
 | `questions`      | The dumbness score, the shape of one question, and the rules for building and submitting a question tree.     | every skill that asks       |
-| `code-review`    | Correctness review of a diff at an effort level.                                                               | `implement`, as the `code-reviewer` subagent |
-| `simplify`       | Quality-only cleanup aligned with the requirement and decisions.                                              | `implement`, as the `worker` subagent |
+| `code-review`    | Correctness review of a diff at an effort level.                                                               | `implement`, in the build or fix run |
+| `simplify`       | Quality-only cleanup aligned with the requirement and decisions.                                              | `implement`, in the build or fix run |
 | `error-handling` | Named error types, expected vs unexpected, documented errors.                                                 | the model, while coding     |
 | `git-commit`     | Conventional commits; never edits code while committing.                                                       | the model, when committing  |
 | `todo-comments`  | Every TODO is a doc comment backed by an issue.                                                                | the model, when writing a TODO |
@@ -32,6 +32,8 @@ At install the app seeds its skills repo (`/var/lib/remote-agent/skills`) from t
 
 `tools:` uses pi's tool names. For Claude Code the app rewrites that line through [`agents/claude-tool-names.json`](./agents/claude-tool-names.json) (the same mapping the NixOS config uses), so the harness, not the prompt, keeps the reviewer and verifier from editing. Subagents never call the app's MCP tools; only the stage run does.
 
+Stage runs never dispatch these agents: a run ends with its turn, so it does every step in its own session, and the app starts Claude runs with subagents and background tasks turned off. The definitions stay for running the skills outside the app.
+
 ## Stages → skills
 
 | Stage     | Run does                                                                                  | Skills it follows                                   | Ends with (besides `stage_done`)                     |
@@ -40,8 +42,8 @@ At install the app seeds its skills repo (`/var/lib/remote-agent/skills`) from t
 | `design`  | requirement + glossary/ADR commit; analyze, decide, prototypes; build round 2             | `ship`, `requirement` (design), `implement` (design), `questions`, `git-commit` | `submit_requirement`, `submit_decisions`, `submit_questions` (design) |
 | `build`   | apply answers; implement, validate, review, fix, simplify; push; draft PR                 | `ship`, `implement` (build), `code-review`, `simplify`, `git-commit` | `push_branch`, `open_pr`                     |
 | `ci`      | no run: the app watches CI                                                                | —                                                   | —                                                    |
-| `fix`     | fix red CI or a merge conflict; push                                                      | `ship`, `git-commit`                                | `push_branch`                                        |
-| `verify`  | final validation, `/verify`, proof, PR description                                        | `ship`, `verify`                                    | `submit_proof`, `update_pr`                          |
+| `fix`     | fix red CI, a merge conflict or failed testing; review, simplify; push                   | `ship`, `implement` (review, fix, simplify), `git-commit` | `push_branch`                                  |
+| `verify`  | ready for testing: final validation, `/verify`, verdict; never fixes                     | `ship`, `verify`                                    | `submit_proof`, `update_pr` (on PASS)               |
 | `job`     | a scheduled job's prompt, once                                                            | `ship` (job)                                        | whatever the job needs                               |
 
 Any stage may submit a `follow_up` round instead and end; the app runs the same stage again once it is answered.

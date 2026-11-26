@@ -41,6 +41,7 @@ type activeRun struct {
 	// Set by MCP tool calls during the run.
 	questions bool
 	prOpened  bool
+	pushed    bool
 	proof     *domain.Proof
 	stageDone bool
 	summary   string
@@ -51,6 +52,10 @@ type activeRun struct {
 	paused        bool
 	capped        string // reason, when a spend cap ended the run
 	limit         *agent.Limit
+	timeout       *time.Timer
+	deadline      time.Time     // when the timeout fires, while running
+	left          time.Duration // time left on the timeout, while paused
+	timedOut      time.Duration // the limit, when the run timed out
 }
 
 // usesBrowser reports whether a stage may drive a browser (and so takes the
@@ -164,6 +169,11 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 	if err := o.st.ClearLinkUpdates(ctx, ar.updated); err != nil {
 		o.log.Error("clear link updates", "ticket", t.ID, "err", err)
 	}
+	limit := o.runTimeout(p)
+	ar.mu.Lock()
+	ar.deadline = time.Now().Add(limit)
+	ar.timeout = time.AfterFunc(limit, func() { o.timeOut(context.WithoutCancel(ctx), ar, limit) })
+	ar.mu.Unlock()
 
 	startedAt := o.now()
 	ar.run.StartedAt = &startedAt
@@ -189,6 +199,42 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		o.watch(context.WithoutCancel(ctx), ar)
 	}()
 	return true, nil
+}
+
+// runTimeout is how long a run of project p may take.
+func (o *Orchestrator) runTimeout(p domain.Project) time.Duration {
+	if p.RunTimeoutMinutes > 0 {
+		return time.Duration(p.RunTimeoutMinutes) * time.Minute
+	}
+	return o.runLimit
+}
+
+// timeOut stops a run that reached its time limit. Time the user keeps a
+// run paused does not count: pausing stops the timer and resuming restarts
+// it with the time that was left (see pauseTimeout).
+func (o *Orchestrator) timeOut(ctx context.Context, ar *activeRun, limit time.Duration) {
+	ar.mu.Lock()
+	if ar.paused {
+		ar.mu.Unlock()
+		return // fired as the run paused; resuming restarts it
+	}
+	ar.timedOut = limit
+	ar.mu.Unlock()
+	o.event(ctx, ar, domain.EventSystem, timedOutAfter(limit))
+	_ = ar.sess.Stop()
+}
+
+// timedOutPrefix starts the error of a run stopped at its time limit.
+const timedOutPrefix = "timed out after "
+
+// timedOutAfter is the error of a run stopped at time limit d, in whole
+// minutes.
+func timedOutAfter(d time.Duration) string {
+	m := int(d.Round(time.Minute) / time.Minute)
+	if m == 1 {
+		return timedOutPrefix + "1 minute"
+	}
+	return fmt.Sprintf("%s%d minutes", timedOutPrefix, m)
 }
 
 // agentCredentials picks the account and secrets a run of kind needs. Not
@@ -480,6 +526,11 @@ func (o *Orchestrator) watch(ctx context.Context, ar *activeRun) {
 			final = ev
 		}
 	}
+	ar.mu.Lock()
+	if ar.timeout != nil {
+		ar.timeout.Stop()
+	}
+	ar.mu.Unlock()
 	if final.Cost > 0 && ar.run.Agent != domain.AgentPi {
 		// claude reports a run total at the end.
 		ar.run.CostUSD = final.Cost
@@ -562,6 +613,9 @@ func (o *Orchestrator) signal(ctx context.Context, ticketID int64, sig syscall.S
 		return fmt.Errorf("signal run: %w", err)
 	}
 	ar.mu.Lock()
+	if ar.paused != pause {
+		ar.pauseTimeout(pause)
+	}
 	ar.paused = pause
 	ar.mu.Unlock()
 	if pause {
@@ -573,6 +627,23 @@ func (o *Orchestrator) signal(ctx context.Context, ticketID int64, sig syscall.S
 		o.event(ctx, ar, domain.EventSystem, "resumed")
 	}
 	return o.st.UpdateRun(ctx, ar.run)
+}
+
+// pauseTimeout stops the run's timeout when it pauses and restarts it with
+// the time that was left when it resumes. Callers hold ar.mu.
+func (ar *activeRun) pauseTimeout(pause bool) {
+	if ar.timeout == nil {
+		return
+	}
+	if pause {
+		ar.left = 0
+		if ar.timeout.Stop() {
+			ar.left = time.Until(ar.deadline)
+		}
+		return
+	}
+	ar.deadline = time.Now().Add(ar.left)
+	ar.timeout.Reset(ar.left)
 }
 
 // Stop ends a ticket's run; the ticket returns to the backlog.

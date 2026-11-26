@@ -11,14 +11,14 @@ import (
 
 const ticketCols = `id, project_id, kind, title, idea, status, stage, agent, model, effort, prototypes,
 	issue, branch, pr, verified_sha, requirement, decisions, status_note, start_at, wait_until, fix_rounds,
-	spend_usd, spend_cap_usd, job_prompt, created_at, updated_at`
+	fix_trigger, spend_usd, spend_cap_usd, job_prompt, created_at, updated_at`
 
 func scanTicket(r interface{ Scan(...any) error }) (domain.Ticket, error) {
 	var t domain.Ticket
 	var startAt, waitUntil sql.NullTime
 	err := r.Scan(&t.ID, &t.ProjectID, &t.Kind, &t.Title, &t.Idea, &t.Status, &t.Stage, &t.Agent,
 		&t.Model, &t.Effort, &t.Prototypes, &t.Issue, &t.Branch, &t.PR, &t.VerifiedSHA, &t.Requirement, &t.Decisions,
-		&t.StatusNote, &startAt, &waitUntil, &t.FixRounds, &t.SpendUSD, &t.SpendCapUSD, &t.JobPrompt,
+		&t.StatusNote, &startAt, &waitUntil, &t.FixRounds, &t.FixTrigger, &t.SpendUSD, &t.SpendCapUSD, &t.JobPrompt,
 		&t.CreatedAt, &t.UpdatedAt)
 	t.StartAt = timePtr(startAt)
 	t.WaitUntil = timePtr(waitUntil)
@@ -31,11 +31,11 @@ func (s *Store) CreateTicket(ctx context.Context, t domain.Ticket) (domain.Ticke
 	t.UpdatedAt = t.CreatedAt
 	res, err := s.db.ExecContext(ctx, `INSERT INTO tickets(project_id, kind, title, idea, status, stage,
 		agent, model, effort, prototypes, issue, branch, pr, verified_sha, requirement, decisions, status_note, start_at,
-		wait_until, fix_rounds, spend_usd, spend_cap_usd, job_prompt, created_at, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		wait_until, fix_rounds, fix_trigger, spend_usd, spend_cap_usd, job_prompt, created_at, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ProjectID, t.Kind, t.Title, t.Idea, t.Status, t.Stage, t.Agent, t.Model, t.Effort, t.Prototypes,
 		t.Issue, t.Branch, t.PR, t.VerifiedSHA, t.Requirement, t.Decisions, t.StatusNote, nullTime(t.StartAt),
-		nullTime(t.WaitUntil), t.FixRounds, t.SpendUSD, t.SpendCapUSD, t.JobPrompt, t.CreatedAt, t.UpdatedAt)
+		nullTime(t.WaitUntil), t.FixRounds, t.FixTrigger, t.SpendUSD, t.SpendCapUSD, t.JobPrompt, t.CreatedAt, t.UpdatedAt)
 	if err != nil {
 		return t, fmt.Errorf("create ticket: %w", err)
 	}
@@ -93,10 +93,10 @@ func (s *Store) UpdateTicket(ctx context.Context, t *domain.Ticket) error {
 	t.UpdatedAt = now()
 	_, err := s.db.ExecContext(ctx, `UPDATE tickets SET title=?, idea=?, status=?, stage=?, agent=?, model=?,
 		effort=?, prototypes=?, issue=?, branch=?, pr=?, verified_sha=?, requirement=?, decisions=?, status_note=?, start_at=?,
-		wait_until=?, fix_rounds=?, spend_usd=?, spend_cap_usd=?, job_prompt=?, updated_at=? WHERE id=?`,
+		wait_until=?, fix_rounds=?, fix_trigger=?, spend_usd=?, spend_cap_usd=?, job_prompt=?, updated_at=? WHERE id=?`,
 		t.Title, t.Idea, t.Status, t.Stage, t.Agent, t.Model, t.Effort, t.Prototypes, t.Issue, t.Branch,
 		t.PR, t.VerifiedSHA, t.Requirement, t.Decisions, t.StatusNote, nullTime(t.StartAt), nullTime(t.WaitUntil),
-		t.FixRounds, t.SpendUSD, t.SpendCapUSD, t.JobPrompt, t.UpdatedAt, t.ID)
+		t.FixRounds, t.FixTrigger, t.SpendUSD, t.SpendCapUSD, t.JobPrompt, t.UpdatedAt, t.ID)
 	if err != nil {
 		return fmt.Errorf("update ticket: %w", err)
 	}

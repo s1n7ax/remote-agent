@@ -1,6 +1,8 @@
 // Package claude runs the official claude CLI in bidirectional stream-json
 // mode. One session is one task: after the turn's result the session closes
-// stdin and the CLI exits.
+// stdin and the CLI exits. A run therefore never waits on work it started:
+// background tasks are disabled and subagents are not available, so every
+// tool call finishes inside the turn.
 package claude
 
 import (
@@ -36,6 +38,7 @@ func Args(spec agent.Spec) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--dangerously-skip-permissions",
+		"--disallowedTools", "Agent,Task",
 	}
 	if spec.Model != "" {
 		args = append(args, "--model", spec.Model)
@@ -57,8 +60,14 @@ func Args(spec agent.Spec) []string {
 
 // Env returns the CLI environment for spec. ANTHROPIC_API_KEY is always
 // removed: runs must bill the subscription login, never an API key.
+// Background tasks are disabled: a turn that ended waiting for one would end
+// the run.
 func Env(spec agent.Spec) []string {
-	base := map[string]string{"CLAUDE_CONFIG_DIR": spec.ConfigDir, "HOME": spec.Home}
+	base := map[string]string{
+		"CLAUDE_CONFIG_DIR":                    spec.ConfigDir,
+		"HOME":                                 spec.Home,
+		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+	}
 	return proc.Env(base, spec.Env, "ANTHROPIC_API_KEY")
 }
 

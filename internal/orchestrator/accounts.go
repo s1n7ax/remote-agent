@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -91,7 +92,8 @@ func (o *Orchestrator) markExhausted(ctx context.Context, accountID int64, till 
 var sessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // resumeSession returns the session to resume for a run that continues a
-// stage interrupted by a usage limit, copying the transcript into the new
+// stage the run before it left unfinished (a usage limit, a run that ended
+// without its outcome, a timeout, a restart), copying the transcript into the new
 // account's config dir (cfgRel under home) when the account changed. It
 // returns "" for a fresh start. home is agent-writable, so the copy goes
 // through the os.Root at it: a transcript that is a symlink out of home is
@@ -110,7 +112,8 @@ func (o *Orchestrator) resumeSession(ctx context.Context, ar *activeRun, home *o
 		if r.ID == ar.run.ID {
 			continue
 		}
-		if r.Stage == ar.ticket.Stage && r.Status == domain.RunLimited && r.SessionID != "" && r.Agent == domain.AgentClaude {
+		continues := r.Status == domain.RunLimited || (r.Status == domain.RunFailed && leftUnfinished(r.Error))
+		if r.Stage == ar.ticket.Stage && continues && r.SessionID != "" && r.Agent == domain.AgentClaude {
 			prev = &r
 		}
 		break // only the run right before this one counts
@@ -144,6 +147,18 @@ func (o *Orchestrator) resumeSession(ctx context.Context, ar *activeRun, home *o
 		return prev.SessionID
 	}
 	return ""
+}
+
+// leftUnfinished reports whether a failed run's error means its conversation
+// was cut short (no outcome, a timeout, a restart) rather than broken: only
+// such a conversation is worth continuing.
+func leftUnfinished(runErr string) bool {
+	for _, prefix := range []string{unfinishedPrefix, timedOutPrefix, interruptedPrefix} {
+		if strings.HasPrefix(runErr, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // copyIn copies regular file src to a new file dst, both under root.
