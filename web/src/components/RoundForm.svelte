@@ -45,8 +45,12 @@
     if (completed || submitting || !prog.complete) return;
     submitting = true;
     try {
-      // Save the text typed just before the tap, then wait for every save.
-      for (const [qid, a] of Object.entries(drafts)) void save(qid, a);
+      // Save the text typed just before the tap and retry failed saves, then
+      // wait for every save; a save that still fails has shown its toast.
+      for (const q of prog.visible) {
+        const a = drafts[q.id] ?? (status[q.id] === 'error' ? answers[q.id] : undefined);
+        if (a) void save(q.id, a);
+      }
       await Promise.all(Object.values(pending));
       if (prog.visible.some((q) => status[q.id] === 'error')) return;
       const res = await api.submitRound(round.ticketId, round.n);
