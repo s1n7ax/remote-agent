@@ -43,6 +43,7 @@ A ticket's `status` is its board column; its `stage` says which `/ship` step run
 | `ready`       | queued for the next stage's run                                            |
 | `working`     | a run is active                                                            |
 | `waiting`     | waiting for a usage-limit reset (`waitUntil`) or for CI                    |
+| `ready_for_testing` | CI is green on the PR head; queued for the verify run                |
 | `in_review`   | PR green and out of draft, proof attached; waiting for the user to merge   |
 | `done`        | PR merged (or job finished)                                                |
 | `failed`      | a run failed after retries; the card shows why and offers retry            |
@@ -51,10 +52,12 @@ Stages, in order (a stage may post an extra round, which sends the ticket to `ne
 
 1. `explore` — read the repo and the idea; post round 1 (requirement questions, full branching tree).
 2. `design` — write the requirement (incl. glossary/ADR updates on the goal branch), explore the design; post round 2 (requirement confirmation + design tree). With prototypes requested: build 2–3 prototype branches, start previews, submit prototypes; the pick is a question in round 2.
-3. `build` — implement, validate, review (subagent), fix, simplify (subagent), push, open draft PR.
-4. `ci` — no agent: the app polls CI. Green → `verify`. Red/conflict → `fix`.
-5. `fix` — fix CI failure or merge conflict, push; back to `ci` (max 2 rounds, then `failed`).
-6. `verify` — final validation + `/verify`; submit proof; app marks PR ready, waits for CI once more; → `in_review`.
+3. `build` — implement, validate, review, fix, simplify, push, open draft PR, all in one session.
+4. `ci` — no agent: the app polls CI until every check has finished. All green → `ready_for_testing`. Any failure or a conflict → `fix`.
+5. `fix` — fix a CI failure, a merge conflict or a failed verify; review and simplify the fix; push; back to `ci` (max 2 rounds, then `failed`).
+6. `verify` — from `ready_for_testing`: final validation + `/verify`, a PASS/FAIL verdict with proof; it never fixes. PASS → the app marks the PR ready, waits for CI once more → `in_review`. FAIL → `fix`.
+
+A run never waits on anything: it ends with the agent's turn. Claude runs get `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` and no subagent tool. A stage is finished by its outcome tool (`open_pr`, `push_branch`, `submit_proof`, `submit_questions`; `stage_done` for explore and job). A run that ends without it is continued once in the same conversation (`--resume`, with the reason in the prompt); a second such end fails the ticket with the agent's last message, and Retry resumes the conversation. Each run has a time limit: the project's `runTimeoutMinutes`, else the config's (default 120); a run that reaches it is stopped and the ticket fails.
 7. merged (polled) → `done`.
 
 Starting: `backlog` → `ready(explore)` by the Start button or a ticket schedule (`startAt`). Answers save as they are given; tapping Submit on a round whose every visible question is answered moves `needs_input` → `ready`.
@@ -139,7 +142,7 @@ The app runs as the same uid as the agents, outside their sandboxes, and holds t
 
 ## App MCP tools (per run)
 
-`submit_questions(tree)`, `submit_requirement(markdown)`, `submit_decisions(markdown)`, `submit_prototypes(list)`, `start_preview(command, port)`, `submit_proof(report_markdown, files)`, `upload_artifact(path)`, `push_branch()`, `open_pr(title, body, draft)`, `update_pr(body)`, `ci_status()`, `ci_logs(check)`, `get_issue()`, `comment(body)`, `list_pulls()`, `request_wait_ci()`, `stage_done(summary)`. There is deliberately no merge tool.
+`submit_questions(tree)`, `submit_requirement(markdown)`, `submit_decisions(markdown)`, `submit_prototypes(list)`, `start_preview(command, port)`, `submit_proof(verdict, report_markdown, files)`, `upload_artifact(path)`, `push_branch()`, `open_pr(title, body, draft)`, `update_pr(body)`, `ci_status()`, `ci_logs(check)`, `get_issue()`, `comment(body)`, `list_pulls()`, `request_wait_ci()`, `stage_done(summary)`. There is deliberately no merge tool.
 
 ## Config
 
@@ -167,6 +170,7 @@ The app runs as the same uid as the agents, outside their sandboxes, and holds t
   "sandboxPath": "",            // overrides sandboxEnv/bin
   "sandbox": true,              // false runs agents without bubblewrap (dev/tests)
   "ciPollSeconds": 60,
+  "runTimeoutMinutes": 120,     // a run's time limit; a project may set its own
   "githubApiUrl": "https://api.github.com",          // fakes in e2e
   "githubGraphqlUrl": "https://api.github.com/graphql",
   "gitUrl": "https://github.com",

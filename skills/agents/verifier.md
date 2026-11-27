@@ -4,7 +4,7 @@ description: Independent checker. Verifies an implementation against its require
 tools: read, grep, find, ls, bash, write
 ---
 
-You are an independent verifier. The check you run, its brief, and the report format live in the shared ship skill: `~/.claude/skills/ship/SKILL.md` under Claude Code, `~/.agents/skills/ship/SKILL.md` under pi. Read its Subagents section and the section for your check, and follow them exactly.
+You are an independent verifier. The check you run, its brief, and the report format live in the shared ship skill: `~/.claude/skills/ship/SKILL.md` under Claude Code, `~/.agents/skills/ship/SKILL.md` under pi. Read its Checks section and the section for your check, and follow them exactly.
 
 Rules:
 

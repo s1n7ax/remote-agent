@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Build the requirement documented by /requirement, over two stage runs. The design run analyzes the code, proves unverified claims with throwaway spikes, drafts the decisions, builds prototypes when the ticket asks, and submits the round-2 design questions (approach forks, significant stretches, requirement gaps) bundled with the requirement confirmation. The build run applies the answers, implements, validates, runs /code-review in a subagent, fixes the findings, and runs /simplify in a subagent. Only use when a stage run's prompt or the ship skill sends you here; never trigger on your own.
+description: Build the requirement documented by /requirement, over two stage runs. The design run analyzes the code, proves unverified claims with throwaway spikes, drafts the decisions, builds prototypes when the ticket asks, and submits the round-2 design questions (approach forks, significant stretches, requirement gaps) bundled with the requirement confirmation. The build run applies the answers, implements, validates, runs /code-review, fixes the findings, and runs /simplify, all in that one session. Only use when a stage run's prompt or the ship skill sends you here; never trigger on your own.
 disable-model-invocation: true
 ---
 
@@ -180,7 +180,7 @@ Fix failures and rerun until green. Never move to review with failing checks, an
 
 ### 4. Review
 
-Run the review as a **subagent**: a fresh context does not defend the code it wrote. Dispatch the `code-reviewer` agent (Claude Code's Agent tool; pi's `subagent` tool) with the goal branch's changes from the base branch as the target, at `medium` effort unless the ticket asks for another level. The subagent reviews; it never fixes. If the environment has no subagent capability, run the review in this session and say so, per the code-review skill's own fallback rule.
+Run the review in this session: read the code-review skill (`~/.claude/skills/code-review/SKILL.md`, or `~/.agents/skills/code-review/SKILL.md` under pi) and follow it on the goal branch's changes from the base branch, at `medium` effort unless the ticket asks for another level, doing every angle it asks for sequentially. Never dispatch a subagent or a background task for it: a run that ends its turn to wait for one ends the stage. Review as a stranger to the code: judge the diff against the requirement, not against what you meant to write.
 
 Write the findings to `.ship/<goal>/code-review/<n>-review.md`, where `<n>` is one higher than the highest existing review number (`1-review.md` for the first). Each review round gets its own file; earlier files are never edited by later rounds.
 
@@ -190,7 +190,7 @@ Write the findings to `.ship/<goal>/code-review/<n>-review.md`, where `<n>` is o
 - **Date:** <date>
 - **Scope:** <branch or diff reviewed>
 - **Effort:** <level>
-- **Reviewer:** code-reviewer subagent (or: in-session fallback)
+- **Reviewer:** in-session
 
 ## Findings
 
@@ -215,9 +215,9 @@ After all fixes, rerun Validate. A fix that breaks a check is not a fix.
 
 ### 6. Simplify
 
-Run `/simplify` as a **subagent**, for the same reason as the review. Simplify edits files, so dispatch the `worker` agent (or a general-purpose agent where the environment has no `worker`), telling it to read the simplify skill (`~/.claude/skills/simplify/SKILL.md`, or `~/.agents/skills/simplify/SKILL.md` under pi) and follow it on this goal's changes, naming the goal so it finds the requirement and decisions. If the environment has no subagent capability, run it in this session and say so.
+Run `/simplify` in this session, for the same reason as the review: read the simplify skill (`~/.claude/skills/simplify/SKILL.md`, or `~/.agents/skills/simplify/SKILL.md` under pi) and follow it on this goal's changes, with the requirement and decisions as its guide. No subagent, no background task.
 
-Review the subagent's changes, then rerun Validate. Simplify is quality-only; its changes need no entries in the review file.
+Then rerun Validate. Simplify is quality-only; its changes need no entries in the review file.
 
 Stop here: `/ship`'s build section runs the remaining checks, pushes the branch and opens the draft PR.
 
@@ -233,6 +233,7 @@ Stop here: `/ship`'s build section runs the remaining checks, pushes the branch 
 - Never ask again what the decisions file already records.
 - Never build more than 3 prototypes, or push one.
 - Never skip the review, the fix pass, or the simplify pass.
+- Never dispatch a subagent or a background task, or end a turn to wait for one; the run ends with the turn.
 - Never mark a finding fixed without the fix applied and validation rerun.
 - Never edit or delete an earlier review file.
 - Never claim tests, checks, or reviews ran that did not run.

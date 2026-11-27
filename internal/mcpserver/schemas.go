@@ -262,8 +262,10 @@ is no pull request). Use sparingly for things reviewers should see on GitHub.`
 
 const descListPulls = `List the project's open pull requests (number, title, branch, head sha, draft).`
 
-const descStageDone = `Finish this run's stage. summary (markdown) tells the user and the next stage
-what was done, what is left, and anything surprising. After calling it, end your turn.`
+const descStageDone = `Record this run's summary. summary (markdown) tells the user and the next stage
+what was done, what is left, and anything surprising. The stage's outcome tool (open_pr,
+push_branch, submit_proof, submit_questions) is what finishes it; call this last, then end
+your turn.`
 
 const schemaStageDone = `{
   "type": "object",

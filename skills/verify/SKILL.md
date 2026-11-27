@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Verify a finished change the way its end user would — in a real browser for web apps (Playwright MCP), in a real terminal for CLIs and TUIs, with curl against the running API for backend-only changes. Runs every test on the code before the change and after it, side by side, captures screenshots as proof, and renders a report with plain-language steps and a PASS/FAIL per test, as HTML and as the Markdown the verify stage submits to the ticket as proof, screenshots included. Not the formatter/lint/unit-test validation /implement already does. Only use when the ship skill's verify stage sends you here (usually as the acceptance-tester subagent); never trigger on your own.
+description: Verify a finished change the way its end user would — in a real browser for web apps (Playwright MCP), in a real terminal for CLIs and TUIs, with curl against the running API for backend-only changes. Runs every test on the code before the change and after it, side by side, captures screenshots as proof, and renders a report with plain-language steps and a PASS/FAIL per test, as HTML and as the Markdown the verify stage submits to the ticket as proof, screenshots included. Not the formatter/lint/unit-test validation /implement already does. Only use when the ship skill's verify stage sends you here; the verify run follows it itself. Never trigger on your own.
 disable-model-invocation: true
 ---
 
@@ -35,13 +35,13 @@ A UI verdict comes from the rendered page in a browser. Never decide one with cu
 
 ### 1. Load the goal
 
-The brief names the `<goal>`, the checkout, the branch and the base branch. Read the requirement, `.ship/<goal>/requirement/requirement.md`, and the decisions file: the requirement's acceptance criteria are what you test.
+The run's prompt names the `<goal>`, the checkout, the branch and the base branch. Read the requirement, `.ship/<goal>/requirement/requirement.md`, and the decisions file: the requirement's acceptance criteria are what you test.
 
-Without a requirement (a job run verifying a PR branch), `<goal>` is the branch name in kebab-case, the change is the diff from the branch's base, and the tests come from the commits, the PR description, and the brief.
+Without a requirement (a job run verifying a PR branch), `<goal>` is the branch name in kebab-case, the change is the diff from the branch's base, and the tests come from the commits, the PR description, and the job's prompt.
 
 ### 2. Recall what you already know
 
-Before working anything out, read your saved notes for this project (see Remembering) and every answer the brief carries. They may already say how to start the app, which port, which test account, which seed data. Use them; do not ask again.
+Before working anything out, read your saved notes for this project (see Remembering) and every answer the prompt carries. They may already say how to start the app, which port, which test account, which seed data. Use them; do not ask again.
 
 ### 3. Design the tests
 
@@ -64,10 +64,10 @@ git worktree add --detach <tmp>/after  HEAD
 - **Uncommitted work.** The gate leaves the checkout clean. If it has uncommitted changes anyway, they are part of the change: apply them to `after` (`git diff HEAD --binary | git -C <tmp>/after apply`, then copy untracked files) and say so in the report.
 - **Local config.** A fresh worktree lacks gitignored files the app needs (`.env`, `*.local.*` config). Copy them from the checkout into both sides. They are deleted with the worktrees.
 - **Both running at once.** Give each side its own port (`PORT=3001` / `PORT=3002`, `--port`), checking first that the port is free. Give each its own state: database file or schema, data dir, Docker Compose project name (`-p verify-before`), and for CLIs its own `HOME` / `XDG_*`. Never point either side at shared or production data.
-- **Start and wait.** Install dependencies and build in each worktree. Run servers in the background and poll the health URL or port until ready; do not just sleep.
+- **Start and wait.** Install dependencies and build in each worktree. Start servers detached from the shell (`nohup <cmd> > <log> 2>&1 &`), never as a background task of the agent, and poll the health URL or port until ready; do not just sleep.
 - **No base.** A brand-new project or file has no before. That side is "n/a, did not exist" in the report, and the test is judged on after alone.
 
-If the app needs secrets, services, or seed data you cannot find in the repo, the docs, your notes or the brief, return the question (step 5). If something cannot run in the sandbox at all, the tests that need it are NOT RUN. Never test against production without the user's explicit go-ahead in an answer.
+If the app needs secrets, services, or seed data you cannot find in the repo, the docs, your notes or the prompt, ask it (step 5). If something cannot run in the sandbox at all, the tests that need it are NOT RUN. Never test against production without the user's explicit go-ahead in an answer.
 
 ### 5. When you must ask
 
@@ -77,7 +77,7 @@ Ask only when the code, the docs, your notes and your tools cannot answer. That 
 - **Credentials.** A login, an API token, a test account. Ask for test credentials, never a real user's; answers are stored on the ticket's card.
 - **What "correct" looks like.** The requirement does not say, and the before/after difference does not settle it.
 
-Every question passes the `questions` skill first. You cannot reach the user: stop, and return all the questions at once, each with what it blocks and its options (recommended first), shaped so they drop straight into a question tree. The verify stage submits them as a `follow_up` round, saves the answers (see Remembering), and starts you again with them in the brief. When no subagent is running this skill — the stage run follows it itself — submit that round with `submit_questions` yourself (`purpose: "follow_up"`) and end the run.
+Every question passes the `questions` skill first. You cannot reach the user: stop, and submit all the questions at once as a `follow_up` round with `submit_questions` (`purpose: "follow_up"`), each with what it blocks and its options (recommended first), then end the run. The verify stage runs again with the answers; save them (see Remembering).
 
 Keep secrets out of the proof. Pass a token as an environment variable (`term.sh start <goal>-after <dir> TOKEN=...`) and type `$TOKEN`, so the screenshot shows the name, not the value. Never write a secret into the report, your notes, or a commit; refer to it by name ("the staging admin account").
 
@@ -175,11 +175,11 @@ Each run gets its own number; earlier reports are never edited. `.ship/` is loca
 
 Reply with: the result line, the table of tests with verdicts, the path to `<n>-report.md`, the files `report.py` listed, and one line per FAIL or NOT RUN saying what went wrong or what blocked it. Add any fact worth remembering that you learned (see Remembering).
 
-The verify stage hands the Markdown and those files to the app with `submit_proof(report_markdown, files)`. When no subagent is running this skill, do that yourself.
+The verify run hands the Markdown and those files to the app with `submit_proof(verdict, report_markdown, files)`.
 
 ## Remembering
 
-Whenever an answer tells you something you could not work out yourself (how to start the app, which port or URL, which test account, how to seed data, what a page is called, that a flow needs a feature flag), save it so the next `/verify` on this project starts with it. Save it as soon as you have the answer, not at the end. A subagent that may not write outside `.ship/<goal>/verify/` returns the fact in its reply instead, and the verify stage saves it.
+Whenever an answer tells you something you could not work out yourself (how to start the app, which port or URL, which test account, how to seed data, what a page is called, that a flow needs a feature flag), save it so the next `/verify` on this project starts with it. Save it as soon as you have the answer, not at the end.
 
 - Use the agent's native persistent memory when it has one (Claude Code's memory directory, for example): one fact per entry, naming the project.
 - Otherwise append to `~/.agents/verify-notes/<project>.md`, where `<project>` is the repo's directory name.

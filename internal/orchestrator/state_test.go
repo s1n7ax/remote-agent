@@ -191,7 +191,7 @@ func TestInReviewHeadMovedReverifies(t *testing.T) {
 	}
 
 	h.gh.update(n, func(p *PullState) { p.HeadSHA, p.CI = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "pending" })
-	got := h.waitState(tk.ID, domain.StatusReady, domain.StageVerify)
+	got := h.waitState(tk.ID, domain.StatusWaiting, domain.StageCI)
 	if !strings.Contains(got.StatusNote, "moved") {
 		t.Fatalf("note = %q", got.StatusNote)
 	}
@@ -215,9 +215,10 @@ func TestMergeRefusesUnverifiedHead(t *testing.T) {
 	if m := h.gh.mergeCalls(); len(m) != 0 {
 		t.Fatalf("merged an unverified head: %v", m)
 	}
-	// The refused merge rechecks CI, which sends the ticket back to verify;
-	// wait for that so no poll of the old head lands after the steps below.
-	h.waitState(tk.ID, domain.StatusReady, domain.StageVerify)
+	// The refused merge rechecks CI, which sends the ticket back to CI, then
+	// to testing; wait for that so no poll of the old head lands after the
+	// steps below.
+	h.waitState(tk.ID, domain.StatusReadyForTesting, domain.StageVerify)
 
 	// Never verified at all.
 	cur := h.ticket(tk.ID)
@@ -347,6 +348,8 @@ func TestVerifyRecordsTheTestedCommit(t *testing.T) {
 	}
 	moved := mustGit(t, r.Info.Workdir, "rev-parse", "HEAD")
 	passVerify(t, h, r)
+	h.waitState(tk.ID, domain.StatusWaiting, domain.StageCI)
+	h.gh.setCI(n, "success") // the new head is tested once its CI is green
 
 	r2 := h.nextRun()
 	got := h.ticket(tk.ID)
@@ -357,7 +360,9 @@ func TestVerifyRecordsTheTestedCommit(t *testing.T) {
 		t.Fatal("PR marked ready on an unverified head")
 	}
 	passVerify(t, h, r2)
-	got = h.waitState(tk.ID, domain.StatusWaiting, domain.StageCI)
+	// CI is already green on the new head, so the final wait may pass at
+	// once: wait for whichever state the poll leaves it in.
+	got = h.waitTicket(tk.ID, "verified", func(t domain.Ticket) bool { return t.VerifiedSHA != "" })
 	if got.VerifiedSHA != moved {
 		t.Fatalf("verified sha = %q, want %q", got.VerifiedSHA, moved)
 	}

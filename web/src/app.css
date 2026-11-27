@@ -24,6 +24,7 @@
   --lamp-ready: #2f7fd9;
   --lamp-working: #2449d4;
   --lamp-waiting: #7a5ad0;
+  --lamp-ready_for_testing: #0f8aa3;
   --lamp-in_review: #138a73;
   --lamp-done: #3c8a3f;
   --lamp-failed: #cc3a2e;
@@ -71,6 +72,7 @@
     --lamp-ready: #5aa5ff;
     --lamp-working: #7d9bff;
     --lamp-waiting: #a88cf0;
+    --lamp-ready_for_testing: #3fc0d8;
     --lamp-in_review: #3cc4a6;
     --lamp-done: #6cc070;
     --lamp-failed: #ff6b5e;
@@ -108,6 +110,7 @@
   --lamp-ready: #5aa5ff;
   --lamp-working: #7d9bff;
   --lamp-waiting: #a88cf0;
+  --lamp-ready_for_testing: #3fc0d8;
   --lamp-in_review: #3cc4a6;
   --lamp-done: #6cc070;
   --lamp-failed: #ff6b5e;

@@ -27,6 +27,9 @@ type Config struct {
 	MaxParallelRuns int    `json:"maxParallelRuns"`
 	// CIPollSeconds is how often waiting PRs are polled (default 60).
 	CIPollSeconds int `json:"ciPollSeconds"`
+	// RunTimeoutMinutes stops a run that takes longer (default 120); a
+	// project may override it.
+	RunTimeoutMinutes int `json:"runTimeoutMinutes"`
 
 	GitHubTokenFile   string `json:"githubTokenFile"`
 	GitHubAPIURL      string `json:"githubApiUrl"`
@@ -100,6 +103,9 @@ func (c *Config) defaults() {
 	def(&c.SandboxPATH, "/run/current-system/sw/bin")
 	if c.MaxParallelRuns <= 0 {
 		c.MaxParallelRuns = 2
+	}
+	if c.RunTimeoutMinutes <= 0 {
+		c.RunTimeoutMinutes = 120
 	}
 }
 

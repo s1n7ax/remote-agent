@@ -18,6 +18,8 @@ import (
 // systemPrompt is appended to every run's system prompt.
 const systemPrompt = `You are an unattended coding agent run by remote-agent. Nobody watches this session live, and you cannot ask the user anything directly: every question goes through the remote-agent MCP tool submit_questions, and the user answers it later on the ticket.
 
+The run ends when your turn ends. Do every step yourself in this session: never start subagents or background tasks, and never end a turn to wait for something. The app waits for CI and for the user, and starts the next run.
+
 You have no GitHub credentials and no gh CLI. Use the remote-agent MCP tools for every GitHub action. There is no way to merge a pull request, and you must never try: merging is the user's decision.`
 
 // goalName is the ticket's goal: its branch without the ra/<id>- prefix.
@@ -119,7 +121,7 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 
 	line("You are running the `%s` stage of the /ship flow for one ticket on the remote-agent board.", t.Stage)
 	line("Read %s/ship/SKILL.md, then follow its \"Stage: %s\" section in full.", skillsDirFor(ar.run.Agent), t.Stage)
-	line("You cannot reach the user except through the app's MCP tools. End the run with stage_done.")
+	line("You cannot reach the user except through the app's MCP tools. Report the stage's outcome with its tool, end the run with stage_done, and never end a turn to wait for anything: the run ends with your turn.")
 	line("")
 	line("## Run")
 	line("")
@@ -148,8 +150,16 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 		line("- critical: no")
 		line("- review effort: medium")
 	}
-	if r := o.resumeReason(ctx, t); r != "" {
+	r, why := o.resumeReason(ctx, t)
+	if r != "" {
 		line("- resumed: %s", r)
+	}
+	if why != "" {
+		line("")
+		line("## Why the last run stopped")
+		line("")
+		line("Your previous run of this stage stopped before it finished: %s.", why)
+		line("Continue the stage from where it stopped; do not redo work the checkout and .ship/%s/ already show.", goal)
 	}
 
 	if t.Stage == domain.StageExplore || t.Stage == domain.StageDesign {
@@ -178,15 +188,25 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 			}
 		}
 	}
+	if (t.Stage == domain.StageFix || t.Stage == domain.StageVerify) && tc.Ticket.Requirement != "" {
+		line("")
+		line("## Requirement")
+		line("")
+		line("%s", tc.Ticket.Requirement)
+	}
 	if t.Stage == domain.StageFix {
 		line("")
 		line("## Trigger")
 		line("")
-		kind := "ci_failed"
-		if strings.Contains(t.StatusNote, "conflict") {
-			kind = "conflict"
-		} else if strings.Contains(t.StatusNote, "verification") {
-			kind = "verify_failed"
+		kind := t.FixTrigger
+		switch {
+		case kind != "":
+		case strings.Contains(t.StatusNote, "conflict"):
+			kind = fixConflict
+		case strings.Contains(t.StatusNote, "verification"):
+			kind = fixVerifyFailed
+		default:
+			kind = fixCIFailed
 		}
 		line("- kind: %s", kind)
 		if t.PR != 0 {
@@ -204,7 +224,7 @@ func (o *Orchestrator) prompt(ctx context.Context, ar *activeRun) (user, system 
 			}
 		}
 		line("- fix round: %d of %d", t.FixRounds, maxFixRounds)
-		if kind == "verify_failed" && tc.Proof != nil {
+		if kind == fixVerifyFailed && tc.Proof != nil {
 			line("")
 			line("Last verification report (FAIL):")
 			line("")
@@ -258,25 +278,26 @@ func answerLine(q domain.Question, a domain.Answer) string {
 	return out
 }
 
-// resumeReason says why this run repeats a stage, or "" for a first run.
-func (o *Orchestrator) resumeReason(ctx context.Context, t domain.Ticket) string {
+// resumeReason says why this run repeats a stage ("" for a first run) and,
+// when the run before it failed, what stopped it.
+func (o *Orchestrator) resumeReason(ctx context.Context, t domain.Ticket) (reason, why string) {
 	runs, err := o.st.TicketRuns(ctx, t.ID)
 	if err != nil || len(runs) < 2 {
-		return ""
+		return "", ""
 	}
 	prev := runs[1] // runs[0] is this run
 	if prev.Stage != t.Stage {
-		return ""
+		return "", ""
 	}
 	switch prev.Status {
 	case domain.RunLimited:
-		return "account switch"
+		return "account switch", ""
 	case domain.RunFailed:
-		return "retry after failure"
+		return "retry after failure", prev.Error
 	case domain.RunStopped, domain.RunCapped:
-		return "user resume"
+		return "user resume", ""
 	case domain.RunSucceeded:
-		return "follow_up answered"
+		return "follow_up answered", ""
 	}
-	return ""
+	return "", ""
 }
