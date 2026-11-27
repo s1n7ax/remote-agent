@@ -106,22 +106,24 @@ type ghComment struct {
 type fakeGitHub struct {
 	origin string
 
-	mu        sync.Mutex
-	next      int
-	issues    map[int]string // number → body
-	pulls     map[int]*PullState
-	bodies    map[int]string // PR number → body
-	comments  []ghComment
-	merges    []string // "number:method"
-	mergeSHAs []string // the head each merge required
-	markReady []int
-	pushes    []string
-	pushDirs  []string
-	fetches   []string // repo of each Fetch
+	mu         sync.Mutex
+	next       int
+	issues     map[int]string // number → body
+	issueState map[int]string // number → "open" | "closed:<reason>" once set
+	failState  error          // returned by SetIssueState and SetPullState when set
+	pulls      map[int]*PullState
+	bodies     map[int]string // PR number → body
+	comments   []ghComment
+	merges     []string // "number:method"
+	mergeSHAs  []string // the head each merge required
+	markReady  []int
+	pushes     []string
+	pushDirs   []string
+	fetches    []string // repo of each Fetch
 }
 
 func newFakeGitHub(origin string) *fakeGitHub {
-	return &fakeGitHub{origin: origin, next: 1, issues: map[int]string{}, pulls: map[int]*PullState{}, bodies: map[int]string{}}
+	return &fakeGitHub{origin: origin, next: 1, issues: map[int]string{}, issueState: map[int]string{}, pulls: map[int]*PullState{}, bodies: map[int]string{}}
 }
 
 func (g *fakeGitHub) DefaultBranch(context.Context, string) (string, error) { return "main", nil }
@@ -142,6 +144,42 @@ func (g *fakeGitHub) UpdateIssueBody(_ context.Context, _ string, n int, body st
 	defer g.mu.Unlock()
 	g.issues[n] = body
 	return nil
+}
+
+func (g *fakeGitHub) SetIssueState(_ context.Context, _ string, n int, state, reason string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failState != nil {
+		return g.failState
+	}
+	if state == "closed" {
+		state += ":" + reason
+	}
+	g.issueState[n] = state
+	return nil
+}
+
+func (g *fakeGitHub) SetPullState(_ context.Context, _ string, n int, state string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failState != nil {
+		return g.failState
+	}
+	pr := g.pulls[n]
+	if pr == nil {
+		return fmt.Errorf("no PR %d", n)
+	}
+	if pr.Merged {
+		return fmt.Errorf("PR %d is merged", n)
+	}
+	pr.State = state
+	return nil
+}
+
+func (g *fakeGitHub) issueStateOf(n int) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.issueState[n]
 }
 
 func (g *fakeGitHub) UpsertComment(_ context.Context, _ string, n int, marker, body string) error {

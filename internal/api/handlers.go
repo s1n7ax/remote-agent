@@ -337,6 +337,8 @@ func (s *Server) ticketAction(action string) func(w http.ResponseWriter, r *http
 			err = s.Orch.Resume(ctx, id)
 		case "stop":
 			err = s.Orch.Stop(ctx, id)
+		case "reopen":
+			_, err = s.Orch.Reopen(ctx, id)
 		}
 		if err != nil {
 			return err
@@ -347,6 +349,24 @@ func (s *Server) ticketAction(action string) func(w http.ResponseWriter, r *http
 		}
 		return ok(w, t)
 	}
+}
+
+func (s *Server) wontDo(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	t, err := s.Orch.WontDo(r.Context(), id, in.Reason)
+	if err != nil {
+		return err
+	}
+	return ok(w, t)
 }
 
 func (s *Server) message(w http.ResponseWriter, r *http.Request) error {

@@ -100,13 +100,24 @@ type Ticket struct {
 	FixRounds   int        `json:"fixRounds"`
 	// FixTrigger says why the ticket went to fix: ci_failed | conflict |
 	// verify_failed.
-	FixTrigger  string    `json:"fixTrigger,omitempty"`
-	SpendUSD    float64   `json:"spendUsd"`
-	SpendCapUSD float64   `json:"spendCapUsd"`
-	JobPrompt   string    `json:"jobPrompt,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	FixTrigger  string  `json:"fixTrigger,omitempty"`
+	SpendUSD    float64 `json:"spendUsd"`
+	SpendCapUSD float64 `json:"spendCapUsd"`
+	JobPrompt   string  `json:"jobPrompt,omitempty"`
+	// WontDoAt is set while the ticket is closed as won't do: its status is
+	// done and its stage is where it left off, so Reopen can continue.
+	WontDoAt     *time.Time `json:"wontDoAt,omitempty"`
+	WontDoReason string     `json:"wontDoReason,omitempty"`
+	// WontDoClosedIssue and WontDoClosedPR record what won't do closed on
+	// GitHub, so Reopen reopens exactly that.
+	WontDoClosedIssue bool      `json:"wontDoClosedIssue,omitempty"`
+	WontDoClosedPR    bool      `json:"wontDoClosedPr,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
+
+// WontDo reports whether the ticket is closed as won't do.
+func (t Ticket) WontDo() bool { return t.WontDoAt != nil }
 
 // QuestionKind is how a question is answered.
 type QuestionKind string
