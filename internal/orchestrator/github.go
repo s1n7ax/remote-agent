@@ -44,11 +44,18 @@ type GitHub interface {
 	CreateIssue(ctx context.Context, repo, title, body string) (int, error)
 	ListIssues(ctx context.Context, repo string) ([]Issue, error)
 	UpdateIssueBody(ctx context.Context, repo string, number int, body string) error
+	// SetIssueState opens or closes an issue; state is open | closed and
+	// reason its state_reason (completed | not_planned | reopened, "" for
+	// GitHub's default).
+	SetIssueState(ctx context.Context, repo string, number int, state, reason string) error
 	// UpsertComment edits the comment containing marker, or creates one.
 	UpsertComment(ctx context.Context, repo string, number int, marker, body string) error
 	CreatePull(ctx context.Context, repo, head, base, title, body string, draft bool) (number int, url string, err error)
 	UpdatePullBody(ctx context.Context, repo string, number int, body string) error
 	MarkReady(ctx context.Context, repo string, number int) error
+	// SetPullState opens or closes a PR without merging it; state is open |
+	// closed.
+	SetPullState(ctx context.Context, repo string, number int, state string) error
 	// MergePull merges a PR; method is merge | squash | rebase ("" = repo
 	// default). It merges only when the PR's head is headSHA (GitHub
 	// refuses otherwise); "" means the head at the time of the call.

@@ -464,3 +464,27 @@ func TestTailBuffer(t *testing.T) {
 		t.Errorf("tail = %q", got)
 	}
 }
+
+// Won't do closes an issue as not planned and a PR without merging it.
+func TestCloseIssueNotPlannedAndPull(t *testing.T) {
+	f, c := newFake(t)
+	f.on("PATCH /repos/o/r/issues/7", func(w http.ResponseWriter, r *http.Request) {
+		if m := decode(t, r); m["state"] != "closed" || m["state_reason"] != "not_planned" || m["body"] != nil {
+			t.Errorf("close issue body = %v", m)
+		}
+		writeJSON(w, map[string]any{"number": 7, "state": "closed"})
+	})
+	f.on("PATCH /repos/o/r/pulls/11", func(w http.ResponseWriter, r *http.Request) {
+		if m := decode(t, r); m["state"] != "closed" || m["body"] != nil {
+			t.Errorf("close pull body = %v", m)
+		}
+		writeJSON(w, map[string]any{"number": 11, "state": "closed"})
+	})
+	closed, reason := "closed", "not_planned"
+	if is, err := c.UpdateIssue(ctx, "o/r", 7, IssueUpdate{State: &closed, StateReason: &reason}); err != nil || is.State != "closed" {
+		t.Fatalf("UpdateIssue = %+v, %v", is, err)
+	}
+	if pr, err := c.UpdatePull(ctx, "o/r", 11, PullUpdate{State: &closed}); err != nil || pr.State != "closed" {
+		t.Fatalf("UpdatePull = %+v, %v", pr, err)
+	}
+}

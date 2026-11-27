@@ -54,6 +54,22 @@ func (g *GitHub) UpdateIssueBody(ctx context.Context, repo string, number int, b
 	return err
 }
 
+// SetIssueState implements orchestrator.GitHub.
+func (g *GitHub) SetIssueState(ctx context.Context, repo string, number int, state, reason string) error {
+	u := github.IssueUpdate{State: &state}
+	if reason != "" {
+		u.StateReason = &reason
+	}
+	_, err := g.C.UpdateIssue(ctx, repo, number, u)
+	return err
+}
+
+// SetPullState implements orchestrator.GitHub.
+func (g *GitHub) SetPullState(ctx context.Context, repo string, number int, state string) error {
+	_, err := g.C.UpdatePull(ctx, repo, number, github.PullUpdate{State: &state})
+	return err
+}
+
 // UpsertComment implements orchestrator.GitHub; an empty marker always
 // creates a new comment.
 func (g *GitHub) UpsertComment(ctx context.Context, repo string, number int, marker, body string) error {

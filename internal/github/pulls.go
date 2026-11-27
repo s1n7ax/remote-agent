@@ -51,6 +51,7 @@ type NewPull struct {
 type PullUpdate struct {
 	Title *string `json:"title,omitempty"`
 	Body  *string `json:"body,omitempty"`
+	State *string `json:"state,omitempty"` // open | closed
 }
 
 // MergeResult is GitHub's answer to a merge.
@@ -118,7 +119,7 @@ func (c *Client) CreatePull(ctx context.Context, repo string, np NewPull) (Pull,
 	return pr, nil
 }
 
-// UpdatePull edits a pull request's title and/or body.
+// UpdatePull edits a pull request's title, body or state.
 func (c *Client) UpdatePull(ctx context.Context, repo string, number int, u PullUpdate) (Pull, error) {
 	p, err := repoPath(repo)
 	if err != nil {
