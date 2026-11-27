@@ -38,11 +38,9 @@ func (o *Orchestrator) WontDo(ctx context.Context, id int64, reason string) (dom
 	if err != nil {
 		return t, err
 	}
-	if o.activeFor(id) != nil {
-		// settle leaves a won't-do ticket in done.
-		if err := o.Stop(ctx, id); err != nil && !errors.Is(err, ErrNotActive) {
-			o.log.Warn("won't do: stop run", "ticket", id, "err", err)
-		}
+	// settle leaves a won't-do ticket in done.
+	if err := o.Stop(ctx, id); err != nil && !errors.Is(err, ErrNotActive) {
+		o.log.Warn("won't do: stop run", "ticket", id, "err", err)
 	}
 	if pv := o.Preview(); pv != nil && pv.TicketID == id {
 		o.StopPreview()

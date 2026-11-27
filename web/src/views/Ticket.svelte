@@ -58,6 +58,7 @@
 
   const t = $derived(detail?.ticket);
   const live = $derived(detail?.runs.filter((r) => ['queued', 'running', 'paused'].includes(r.status)).at(-1));
+  const running = $derived(!!live || detail?.ticket.status === 'working');
   const openRound = $derived(detail?.rounds.find((r) => !r.completedAt));
   const openProg = $derived(openRound ? progress(openRound.tree, openRound.answers) : null);
 
@@ -265,11 +266,11 @@
       The ticket moves to Done, marked won't do. Its GitHub issue closes as not planned{t?.pr ? `, PR #${t.pr} closes without merging` : ''} and open
       questions are dropped. Reopen brings it back where it left off.
     </p>
-    {#if live || t?.status === 'working'}<p class="warn">A run is active on this ticket. It will be stopped.</p>{/if}
+    {#if running}<p class="warn">A run is active on this ticket. It will be stopped.</p>{/if}
     <label class="field">Reason (optional) <textarea bind:value={reason} rows="3" placeholder="Shown on the ticket and posted to the issue"></textarea></label>
     {#snippet footer()}
       <button class="btn" type="button" onclick={() => (closing = false)}>Cancel</button>
-      <button class="btn danger grow" type="button" disabled={busy} onclick={wontDo}>{live || t?.status === 'working' ? "Stop the run and close" : "Close as won't do"}</button>
+      <button class="btn danger grow" type="button" disabled={busy} onclick={wontDo}>{running ? 'Stop the run and close' : "Close as won't do"}</button>
     {/snippet}
   </Sheet>
 {/if}
