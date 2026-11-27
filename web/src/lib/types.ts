@@ -78,6 +78,11 @@ export interface Ticket {
   spendUsd: number;
   spendCapUsd: number;
   jobPrompt?: string;
+  /** Set while the ticket is closed as won't do (status done, stage kept). */
+  wontDoAt?: string;
+  wontDoReason?: string;
+  wontDoClosedIssue?: boolean;
+  wontDoClosedPr?: boolean;
   createdAt: string;
   updatedAt: string;
 }
