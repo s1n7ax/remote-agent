@@ -11,15 +11,19 @@
 
   // svelte-ignore state_referenced_locally
   let answers = $state<Record<string, Answer>>({ ...round.answers });
+  // Text typed but not yet saved; it counts towards Submit right away.
+  let drafts = $state<Record<string, Answer>>({});
   let status = $state<Record<string, 'saving' | 'saved' | 'error'>>({});
   // svelte-ignore state_referenced_locally
   let completed = $state(!!round.completedAt);
-  const prog = $derived(progress(round.tree, answers));
+  let submitting = $state(false);
+  const prog = $derived(progress(round.tree, { ...answers, ...drafts }));
   const pending: Record<string, Promise<unknown>> = {};
 
   async function save(qid: string, a: Answer) {
     if (completed) return;
     answers[qid] = a;
+    delete drafts[qid];
     status[qid] = 'saving';
     // Serialize saves per question so the last edit wins.
     const prev = pending[qid] ?? Promise.resolve();
@@ -27,8 +31,7 @@
       try {
         const res = await api.answer(round.ticketId, round.n, qid, a);
         status[qid] = 'saved';
-        if (res.completed) completed = true;
-        onsaved(res.round, res.ticket, res.completed);
+        onsaved(res.round, res.ticket, false);
       } catch (e) {
         status[qid] = 'error';
         app.notify(`Answer not saved: ${errorText(e)}`, 'error');
@@ -36,6 +39,24 @@
     });
     pending[qid] = p;
     await p;
+  }
+
+  async function submit() {
+    if (completed || submitting || !prog.complete) return;
+    submitting = true;
+    try {
+      // Save the text typed just before the tap, then wait for every save.
+      for (const [qid, a] of Object.entries(drafts)) void save(qid, a);
+      await Promise.all(Object.values(pending));
+      if (prog.visible.some((q) => status[q.id] === 'error')) return;
+      const res = await api.submitRound(round.ticketId, round.n);
+      completed = true;
+      onsaved(res.round, res.ticket, true);
+    } catch (e) {
+      app.notify(`Round not submitted: ${errorText(e)}`, 'error');
+    } finally {
+      submitting = false;
+    }
   }
 </script>
 
@@ -62,8 +83,25 @@
   {/if}
 
   {#each prog.visible as q (q.id)}
-    <QuestionField {q} answer={answers[q.id]} status={status[q.id]} readonly={completed} onanswer={(a) => save(q.id, a)} />
+    <QuestionField
+      {q}
+      answer={answers[q.id]}
+      status={status[q.id]}
+      readonly={completed || submitting}
+      onanswer={(a) => save(q.id, a)}
+      ondraft={(a) => (drafts[q.id] = a)} />
   {/each}
+
+  {#if !completed}
+    <div class="submit">
+      <button class="btn primary" type="button" disabled={!prog.complete || submitting} onclick={submit}>
+        {submitting ? 'Submitting…' : 'Submit'}
+      </button>
+      <p class="muted small">
+        {prog.complete ? 'Submitting is final: the answers lock and the next run starts.' : 'Answer every question to submit.'}
+      </p>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -106,6 +144,18 @@
   }
   .intro {
     color: var(--ink-2);
+  }
+  .submit {
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+    text-align: center;
+  }
+  .submit .btn {
+    width: 100%;
+  }
+  .submit p {
+    margin: 0;
   }
   .success {
     display: grid;

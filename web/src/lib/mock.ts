@@ -687,14 +687,18 @@ on('PUT', '/api/tickets/(\\d+)/rounds/(\\d+)/answers/([^/]+)', (m, b: Answer) =>
   if (!r.tree.questions.some((q) => q.id === qid)) throw new ApiError(404, 'question not found');
   if (!b.optionIds?.length && !b.text) delete r.answers[qid];
   else r.answers[qid] = b;
-  const completed = progress(r.tree, r.answers).complete;
-  if (completed) {
-    r.completedAt = new Date().toISOString();
-    t.status = 'ready';
-    t.stage = r.stage;
-  }
+  return { round: r, completed: false, ticket: t };
+});
+on('POST', '/api/tickets/(\\d+)/rounds/(\\d+)/submit', (m) => {
+  const t = find(tickets, (x) => x.id === +m[1], 'ticket');
+  const r = find(rounds, (x) => x.ticketId === t.id && x.n === +m[2], 'round');
+  if (r.completedAt) throw new ApiError(400, `invalid request: round ${r.n} is already complete`);
+  if (!progress(r.tree, r.answers).complete) throw new ApiError(400, `invalid request: round ${r.n} has unanswered questions`);
+  r.completedAt = new Date().toISOString();
+  t.status = 'ready';
+  t.stage = r.stage;
   touch(t);
-  return { round: r, completed, ticket: t };
+  return { round: r, completed: true, ticket: t };
 });
 on('POST', '/api/tickets/(\\d+)/message', (m, b) => {
   const run = activeRun(+m[1]);
