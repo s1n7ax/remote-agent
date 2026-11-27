@@ -47,7 +47,7 @@ func (g *fakeGitHub) mergeHeads() []string {
 
 // Concurrent answers to one round must all be kept, and exactly one of them
 // completes the round.
-func TestConcurrentAnswersCompleteRoundOnce(t *testing.T) {
+func TestConcurrentAnswersAndSubmitsCompleteRoundOnce(t *testing.T) {
 	h := newHarness(t)
 	h.o.Drain(true)
 	const n = 12
@@ -64,8 +64,8 @@ func TestConcurrentAnswersCompleteRoundOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// Concurrent answers keep every answer and complete nothing.
 		var wg sync.WaitGroup
-		var completed atomic.Int32
 		start := make(chan struct{})
 		errs := make(chan error, n)
 		for i := 0; i < n; i++ {
@@ -74,12 +74,11 @@ func TestConcurrentAnswersCompleteRoundOnce(t *testing.T) {
 				defer wg.Done()
 				<-start
 				res, err := h.o.Answer(h.ctx, tk.ID, rd.N, fmt.Sprintf("q%d", i), domain.Answer{Text: fmt.Sprint("a", i)})
+				if err == nil && res.Completed {
+					err = fmt.Errorf("answer q%d completed the round", i)
+				}
 				if err != nil {
 					errs <- err
-					return
-				}
-				if res.Completed {
-					completed.Add(1)
 				}
 			}(i)
 		}
@@ -94,16 +93,35 @@ func TestConcurrentAnswersCompleteRoundOnce(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Answers) != n {
-			t.Fatalf("round kept %d of %d answers: %v", len(got.Answers), n, got.Answers)
+		if len(got.Answers) != n || got.CompletedAt != nil {
+			t.Fatalf("round kept %d of %d answers (completedAt %v): %v", len(got.Answers), n, got.CompletedAt, got.Answers)
 		}
 		for i := 0; i < n; i++ {
 			if a := got.Answers[fmt.Sprintf("q%d", i)]; a.Text != fmt.Sprint("a", i) {
 				t.Fatalf("answer q%d = %+v", i, a)
 			}
 		}
-		if c := completed.Load(); c != 1 || got.CompletedAt == nil {
-			t.Fatalf("round completed %d times (completedAt %v), want once", c, got.CompletedAt)
+		if cur := h.ticket(tk.ID); cur.Status != domain.StatusNeedsInput {
+			t.Fatalf("ticket with every answer saved = %s/%s", cur.Status, cur.Stage)
+		}
+
+		// Concurrent submits complete the round once.
+		var completed atomic.Int32
+		start = make(chan struct{})
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if res, err := h.o.Submit(h.ctx, tk.ID, rd.N); err == nil && res.Completed {
+					completed.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if got, _ = h.st.Round(h.ctx, tk.ID, rd.N); completed.Load() != 1 || got.CompletedAt == nil {
+			t.Fatalf("round completed %d times (completedAt %v), want once", completed.Load(), got.CompletedAt)
 		}
 		if cur := h.ticket(tk.ID); cur.Status != domain.StatusReady || cur.Stage != domain.StageDesign {
 			t.Fatalf("ticket after the round = %s/%s", cur.Status, cur.Stage)
@@ -114,9 +132,9 @@ func TestConcurrentAnswersCompleteRoundOnce(t *testing.T) {
 	}
 }
 
-// The user answers the last question while the run that posted it is being
-// settled: settle must not overwrite the ready ticket with its stale copy.
-func TestSettleRacingAnswer(t *testing.T) {
+// The user submits the round while the run that posted it is being settled:
+// settle must not overwrite the ready ticket with its stale copy.
+func TestSettleRacingSubmit(t *testing.T) {
 	var hook atomic.Pointer[func()]
 	h := newHarness(t, func(_ *harness, o *Options) {
 		now := o.Now
@@ -135,11 +153,14 @@ func TestSettleRacingAnswer(t *testing.T) {
 	if _, err := h.o.ToolSubmitQuestions(h.ctx, r.ID(), tree, domain.PurposeRequirement); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := h.o.Answer(h.ctx, tk.ID, 1, "ok", domain.Answer{OptionIDs: []string{"yes"}}); err != nil {
+		t.Fatal(err)
+	}
 	var answered atomic.Bool
 	answer := func() {
-		res, err := h.o.Answer(h.ctx, tk.ID, 1, "ok", domain.Answer{OptionIDs: []string{"yes"}})
+		res, err := h.o.Submit(h.ctx, tk.ID, 1)
 		if err != nil || !res.Completed {
-			t.Errorf("answer = %+v, %v", res, err)
+			t.Errorf("submit = %+v, %v", res, err)
 		}
 		answered.Store(true)
 	}
@@ -148,7 +169,7 @@ func TestSettleRacingAnswer(t *testing.T) {
 
 	r2 := h.nextRun()
 	if !answered.Load() {
-		t.Fatal("the answer did not race settle")
+		t.Fatal("the submit did not race settle")
 	}
 	if r2.Info.Stage != domain.StageDesign {
 		t.Fatalf("next run stage = %s, want design", r2.Info.Stage)

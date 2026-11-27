@@ -610,6 +610,19 @@ func (h *harness) nextRun() *testRun {
 }
 
 // noRun asserts no run starts within d.
+// answerAndSubmit saves one answer to round n and submits the round.
+func (h *harness) answerAndSubmit(ticketID int64, n int, qid string, a domain.Answer) AnswerResult {
+	h.t.Helper()
+	if _, err := h.o.Answer(h.ctx, ticketID, n, qid, a); err != nil {
+		h.t.Fatalf("answer %s: %v", qid, err)
+	}
+	res, err := h.o.Submit(h.ctx, ticketID, n)
+	if err != nil || !res.Completed {
+		h.t.Fatalf("submit round %d = %+v, %v", n, res, err)
+	}
+	return res
+}
+
 func (h *harness) noRun(d time.Duration) {
 	h.t.Helper()
 	select {
