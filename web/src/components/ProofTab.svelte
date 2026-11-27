@@ -23,6 +23,7 @@
   // stored artifact, or fails to load, becomes a placeholder.
   function inlineScreenshots(root: HTMLElement): void {
     for (const img of Array.from(root.querySelectorAll('img'))) {
+      if (img.parentElement?.classList.contains('shot')) continue; // already inlined
       const id = proofArtifactId(img.getAttribute('src'));
       if (!id) {
         img.replaceWith(unavailable());
@@ -40,8 +41,8 @@
     }
   }
 
+  // {#key html} gives each report a fresh element, so body changes with it.
   $effect(() => {
-    void html;
     if (body) inlineScreenshots(body);
   });
 </script>

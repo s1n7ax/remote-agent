@@ -91,7 +91,7 @@ test('a ticket goes from idea to merged', async ({ page, request }) => {
   await page.screenshot({ path: 'test-results/proof.png', fullPage: true });
   await page.locator('.report table').getByRole('button', { name: 'Zoom screenshot' }).click();
   await expect(page.getByRole('img', { name: 'Screenshot enlarged' })).toBeVisible();
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
   await expect(page.getByRole('img', { name: 'Screenshot enlarged' })).toHaveCount(0);
   await expect(page.getByText('Greeting present')).toBeVisible();
   // The PR's proof comment stays text-only and links to the Proof tab.
