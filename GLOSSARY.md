@@ -27,6 +27,10 @@ _Avoid_: phase, step
 Where a ticket sits on the board: backlog, needs input, ready, working, waiting, ready for testing, in review, done or failed.
 _Avoid_: column, state
 
+**Won't do**:
+A ticket the user closed from the board without building it; it sits in Done, labelled won't do, until it is reopened.
+_Avoid_: cancelled, rejected, wontfix, abandoned
+
 ## Questions
 
 **Round**:
