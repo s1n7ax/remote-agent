@@ -164,7 +164,10 @@ const schemaStartPreview = `{
 
 const descSubmitProof = `Attach the final test evidence to the ticket card: verdict PASS or FAIL, a
 markdown report of what was tested and how (commands, observed results), and files
-(screenshots, logs) as paths inside the working directory, which are uploaded for you.`
+(screenshots, logs) as paths inside the working directory, which are uploaded for you.
+Report images whose path is one of the files show inline on the ticket's Proof tab; a
+file that cannot be stored is listed in the result and never fails the proof. The PR
+gets the report as text, with a link to the ticket's Proof tab instead of images.`
 
 const schemaSubmitProof = `{
   "type": "object",

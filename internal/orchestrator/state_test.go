@@ -297,7 +297,7 @@ func TestJobPushRefusesTicketBranches(t *testing.T) {
 func passVerify(t *testing.T, h *harness, r *testRun) {
 	t.Helper()
 	writeFile(t, filepath.Join(r.Info.Workdir, "shot.png"), "\x89PNG\r\n\x1a\n")
-	if err := h.o.ToolSubmitProof(h.ctx, r.ID(), "PASS", "ok", []string{"shot.png"}); err != nil {
+	if _, err := h.o.ToolSubmitProof(h.ctx, r.ID(), "PASS", "ok", []string{"shot.png"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.o.ToolStageDone(h.ctx, r.ID(), "verified"); err != nil {
