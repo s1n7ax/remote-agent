@@ -93,7 +93,10 @@
     font-size: 1.15rem;
     font-weight: 600;
   }
+  /* Markdown tables are display: block (for horizontal scroll), which turns
+     table-layout off; a screenshot table is a real table so its columns stay equal. */
   .report :global(table:has(.shot, .shot-missing)) {
+    display: table;
     table-layout: fixed;
     width: 100%;
   }
