@@ -157,25 +157,29 @@ func TestContinuedFixKeepsItsTrigger(t *testing.T) {
 	}
 }
 
-// Time paused does not count toward the run's limit.
+// Time paused does not count toward the run's limit: a run paused for
+// longer than its limit still times out no sooner than limit plus the
+// pause. Scheduling delays only make the run end later, so the bound holds
+// on a slow machine.
 func TestPausedTimeDoesNotCount(t *testing.T) {
-	h := newHarness(t, func(_ *harness, o *Options) { o.RunTimeout = 300 * time.Millisecond })
+	const limit, paused = time.Second, 1500 * time.Millisecond
+	h := newHarness(t, func(_ *harness, o *Options) { o.RunTimeout = limit })
 	h.runner.withProcess = true
+	start := time.Now()
 	tk := h.newTicket(domain.Ticket{Stage: domain.StageExplore})
-	r := h.nextRun()
+	h.nextRun()
 	h.waitState(tk.ID, domain.StatusWorking, domain.StageExplore)
 	if err := h.o.Pause(h.ctx, tk.ID); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(paused)
 	if err := h.o.Resume(h.ctx, tk.ID); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	if r.Sess.isEnded() {
-		t.Fatal("paused time counted toward the limit")
-	}
 	got := h.waitState(tk.ID, domain.StatusFailed, domain.StageExplore)
+	if elapsed := time.Since(start); elapsed < limit+paused {
+		t.Fatalf("timed out %s after starting; paused time counted toward the %s limit", elapsed, limit)
+	}
 	if !strings.HasPrefix(got.StatusNote, "timed out after") {
 		t.Fatalf("note = %q", got.StatusNote)
 	}
