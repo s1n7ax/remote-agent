@@ -14,7 +14,7 @@ You answer from your phone, watch runs live, and merge when you are satisfied. *
 
 - **Projects and kanban:** each project has a board (backlog → needs input → ready → working → waiting → in review → done). Issues, PRs and CI sit in one view, with a merge button.
 - **Async `/ship`:**
-  - Question rounds auto-advance the ticket once you answer.
+  - Answers to a question round save as you go; the round finishes, and the ticket advances, when you tap Submit.
   - 2–3 agents run in parallel.
   - Cron schedules create jobs.
   - Prototype picking comes with live previews.

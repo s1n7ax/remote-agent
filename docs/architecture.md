@@ -47,7 +47,7 @@ A ticket's `status` is its board column; its `stage` says which `/ship` step run
 | `done`        | PR merged (or job finished)                                                |
 | `failed`      | a run failed after retries; the card shows why and offers retry            |
 
-Stages, in order (a stage may post an extra round, which sends the ticket to `needs_input` and returns to the same stage once answered):
+Stages, in order (a stage may post an extra round, which sends the ticket to `needs_input` and returns to the same stage once submitted):
 
 1. `explore` — read the repo and the idea; post round 1 (requirement questions, full branching tree).
 2. `design` — write the requirement (incl. glossary/ADR updates on the goal branch), explore the design; post round 2 (requirement confirmation + design tree). With prototypes requested: build 2–3 prototype branches, start previews, submit prototypes; the pick is a question in round 2.
@@ -57,7 +57,7 @@ Stages, in order (a stage may post an extra round, which sends the ticket to `ne
 6. `verify` — final validation + `/verify`; submit proof; app marks PR ready, waits for CI once more; → `in_review`.
 7. merged (polled) → `done`.
 
-Starting: `backlog` → `ready(explore)` by the Start button or a ticket schedule (`startAt`). Answering the last visible question of a round moves `needs_input` → `ready` with no click.
+Starting: `backlog` → `ready(explore)` by the Start button or a ticket schedule (`startAt`). Answers save as they are given; tapping Submit on a round whose every visible question is answered moves `needs_input` → `ready`.
 
 Jobs (scheduled per project, cron) create a ticket of `kind: job` that goes straight to `ready(job)`, runs its prompt once, and ends `done`.
 
@@ -85,7 +85,7 @@ Jobs (scheduled per project, cron) create a ticket of `kind: job` that goes stra
 }
 ```
 
-An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when its `showIf` holds against current answers; hidden questions' answers are ignored. The round is complete when every visible question has an answer (a `confirm` needs `optionIds: ["yes"]` or a text correction).
+An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when its `showIf` holds against current answers; hidden questions' answers are ignored. A round can be submitted when every visible question has an answer (a `confirm` needs `optionIds: ["yes"]` or a text correction); it completes on submit, and its answers lock.
 
 ## HTTP API (JSON, under `/api`)
 
@@ -97,7 +97,8 @@ An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when
 | `POST /api/projects/{id}/tickets`              | create from `{ idea, agent, model, effort, prototypes }` |
 | `GET/PATCH /api/tickets/{id}`                  | ticket detail; patch agent/model/effort/startAt       |
 | `POST /api/tickets/{id}/start`                 | backlog → ready                                       |
-| `PUT /api/tickets/{id}/rounds/{n}/answers/{qid}` | save one answer; response says whether round completed |
+| `PUT /api/tickets/{id}/rounds/{n}/answers/{qid}` | save one answer to an open round; never completes it |
+| `POST /api/tickets/{id}/rounds/{n}/submit` | complete a fully answered round; the ticket moves to `ready` |
 | `POST /api/tickets/{id}/message`               | send a message to the active run                      |
 | `POST /api/tickets/{id}/pause` / `resume` / `stop` / `retry` | run control                     |
 | `GET /api/tickets/{id}/runs/{runId}/events`    | run log (paged)                                       |
