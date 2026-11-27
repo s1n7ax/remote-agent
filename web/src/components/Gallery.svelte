@@ -1,16 +1,9 @@
 <script lang="ts">
   import { artifactUrl } from '../lib/api';
-  import Icon from './Icon.svelte';
+  import ImageZoom from './ImageZoom.svelte';
 
   let { ids, label = 'Screenshot' }: { ids: string[]; label?: string } = $props();
   let zoomed = $state<string | null>(null);
-  let dialog = $state<HTMLDialogElement>();
-
-  $effect(() => {
-    if (!dialog) return;
-    if (zoomed && !dialog.open) dialog.showModal();
-    else if (!zoomed && dialog.open) dialog.close();
-  });
 </script>
 
 <div class="gallery">
@@ -21,12 +14,7 @@
   {/each}
 </div>
 
-<dialog bind:this={dialog} onclose={() => (zoomed = null)} onclick={() => (zoomed = null)}>
-  {#if zoomed}
-    <img src={artifactUrl(zoomed)} alt="{label} enlarged" />
-    <button class="icon-btn close" type="button" aria-label="Close"><Icon name="close" /></button>
-  {/if}
-</dialog>
+<ImageZoom src={zoomed && artifactUrl(zoomed)} alt="{label} enlarged" onclose={() => (zoomed = null)} />
 
 <style>
   .gallery {
@@ -49,31 +37,5 @@
     object-fit: cover;
     object-position: top;
     display: block;
-  }
-  dialog {
-    border: 0;
-    padding: 0;
-    background: transparent;
-    max-width: 100vw;
-    max-height: 100dvh;
-    width: 100vw;
-    height: 100dvh;
-    overflow: auto;
-  }
-  dialog::backdrop {
-    background: rgb(5 8 12 / 88%);
-  }
-  dialog img {
-    display: block;
-    max-width: 100%;
-    margin: 0 auto;
-    touch-action: pinch-zoom;
-  }
-  .close {
-    position: fixed;
-    top: 8px;
-    right: 8px;
-    background: rgb(0 0 0 / 50%);
-    color: #fff;
   }
 </style>
