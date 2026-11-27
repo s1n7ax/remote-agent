@@ -172,3 +172,30 @@ func TestWontDoGitHubFailureAndJobs(t *testing.T) {
 		t.Fatalf("job after won't do: %+v", got)
 	}
 }
+
+// Won't do lands while a run is starting (the scheduler read the ticket as
+// ready just before): the run is stopped and the ticket stays in done.
+func TestWontDoWhileRunStarts(t *testing.T) {
+	h := newHarness(t)
+	h.o.Drain(true)
+	tk := h.newTicket(domain.Ticket{})
+	stale := h.ticket(tk.ID)
+	if _, err := h.o.WontDo(h.ctx, tk.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	started, err := h.o.startRun(h.ctx, stale)
+	if err != nil || !started {
+		t.Fatalf("startRun = %v, %v", started, err)
+	}
+	r := <-h.runner.starts
+	h.waitInactive(tk.ID)
+	if !r.Sess.isEnded() {
+		t.Fatal("the run of a won't-do ticket kept going")
+	}
+	if st := h.run(r.ID()).Status; st != domain.RunStopped {
+		t.Fatalf("run status = %s", st)
+	}
+	if got := h.ticket(tk.ID); got.Status != domain.StatusDone || !got.WontDo() {
+		t.Fatalf("ticket = %s wontDo=%v note=%q", got.Status, got.WontDo(), got.StatusNote)
+	}
+}

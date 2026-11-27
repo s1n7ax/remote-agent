@@ -161,28 +161,46 @@ func (o *Orchestrator) startRun(ctx context.Context, t domain.Ticket) (started b
 		o.finishRunRecord(ctx, ar, domain.RunFailed, err.Error())
 		return false, fmt.Errorf("start %s: %w", kind, err)
 	}
-	ar.sess = sess
 	limit := o.runTimeout(p)
 	ar.mu.Lock()
+	ar.sess = sess
 	ar.deadline = time.Now().Add(limit)
 	ar.timeout = time.AfterFunc(limit, func() { o.timeOut(context.WithoutCancel(ctx), ar, limit) })
+	stopEarly := ar.stopRequested // Stop came before the session existed
 	ar.mu.Unlock()
 
 	startedAt := o.now()
 	ar.run.StartedAt = &startedAt
 	_ = o.st.UpdateRun(ctx, ar.run)
 	// The agent is already running and may have saved the ticket through a
-	// tool call, so update the current row rather than our copy.
-	if cur, err := o.mutate(ctx, t.ID, func(c *domain.Ticket) {
+	// tool call, so update the current row rather than our copy. A ticket
+	// closed as won't do while the run was starting stays done, and the
+	// run is stopped.
+	cur, err := o.update(ctx, t.ID, func(c *domain.Ticket) error {
+		if c.WontDo() {
+			return errUnchanged
+		}
 		c.Status = domain.StatusWorking
 		c.StatusNote = ""
 		c.Branch = t.Branch // set by prepareWorkspace
-	}); err != nil {
+		return nil
+	})
+	switch {
+	case errors.Is(err, errUnchanged):
+		t = cur
+		ar.mu.Lock()
+		ar.stopRequested = true
+		ar.mu.Unlock()
+		stopEarly = true
+	case err != nil:
 		o.log.Error("save ticket", "err", err)
-	} else {
+	default:
 		t = cur
 	}
 	ar.ticket = t
+	if stopEarly {
+		_ = sess.Stop()
+	}
 	o.event(ctx, ar, domain.EventSystem, fmt.Sprintf("started %s stage with %s %s %s", t.Stage, kind, t.Model, t.Effort))
 
 	o.wg.Add(1)
@@ -647,13 +665,16 @@ func (o *Orchestrator) Stop(ctx context.Context, ticketID int64) error {
 	}
 	ar.mu.Lock()
 	ar.stopRequested = true
-	paused := ar.paused
+	paused, sess := ar.paused, ar.sess
 	ar.mu.Unlock()
+	if sess == nil {
+		return nil // still starting: startRun stops it once it has started
+	}
 	if paused {
 		_ = o.Resume(ctx, ticketID)
 	}
 	o.event(ctx, ar, domain.EventSystem, "stop requested")
-	return ar.sess.Stop()
+	return sess.Stop()
 }
 
 func (o *Orchestrator) activeFor(ticketID int64) *activeRun {
