@@ -431,6 +431,22 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) error {
 	return ok(w, res)
 }
 
+func (s *Server) submitRound(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil {
+		return badRequest("bad round")
+	}
+	res, err := s.Orch.Submit(r.Context(), id, n)
+	if err != nil {
+		return err
+	}
+	return ok(w, res)
+}
+
 func (s *Server) runs(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r, "id")
 	if err != nil {

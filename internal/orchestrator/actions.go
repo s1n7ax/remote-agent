@@ -207,37 +207,20 @@ func (o *Orchestrator) RetryTicket(ctx context.Context, id int64) (domain.Ticket
 	return t, nil
 }
 
-// AnswerResult says what saving an answer did.
+// AnswerResult says what saving an answer, or submitting a round, did.
 type AnswerResult struct {
 	Round     domain.Round  `json:"round"`
 	Completed bool          `json:"completed"`
 	Ticket    domain.Ticket `json:"ticket"`
 }
 
-// Answer saves one answer. When it completes the round, the ticket moves to
-// ready (no click needed) and the next run is queued.
+// Answer saves one answer to an open round. It never completes the round;
+// Submit does.
 func (o *Orchestrator) Answer(ctx context.Context, ticketID int64, n int, qid string, a domain.Answer) (AnswerResult, error) {
-	// The round's answers map and the ticket row are read-modify-written
-	// under tmu, so concurrent answers do not drop each other, only one of
-	// them completes the round, and settle sees either the open round or
-	// the resumed ticket.
+	// The round's answers map is read-modify-written under tmu, so
+	// concurrent answers do not drop each other and none lands after Submit.
 	o.tmu.Lock()
-	res, err := o.answerLocked(ctx, ticketID, n, qid, a)
-	o.tmu.Unlock()
-	if err != nil || !res.Completed {
-		return res, err
-	}
-	o.postRoundSummary(ctx, res.Ticket, res.Round)
-	// The pick is made: a prototype preview of this ticket has done its job.
-	if pv := o.Preview(); pv != nil && pv.TicketID == res.Ticket.ID {
-		o.StopPreview()
-	}
-	o.Kick()
-	return res, nil
-}
-
-// answerLocked is Answer's read-modify-write; the caller holds tmu.
-func (o *Orchestrator) answerLocked(ctx context.Context, ticketID int64, n int, qid string, a domain.Answer) (AnswerResult, error) {
+	defer o.tmu.Unlock()
 	var res AnswerResult
 	rd, err := o.st.Round(ctx, ticketID, n)
 	if err != nil {
@@ -270,20 +253,62 @@ func (o *Orchestrator) answerLocked(ctx context.Context, ticketID int64, n int, 
 	} else {
 		rd.Answers[qid] = a
 	}
-	if questions.Complete(rd.Tree, rd.Answers) {
-		now := o.now()
-		rd.CompletedAt = &now
-		res.Completed = true
-	}
 	if err := o.st.SaveRound(ctx, rd); err != nil {
 		return res, err
 	}
-	if res.Completed {
-		if err := o.roundCompleted(ctx, &t, rd); err != nil {
-			return res, err
-		}
-	}
 	res.Round, res.Ticket = rd, t
+	return res, nil
+}
+
+// Submit completes an open round whose every visible question is answered:
+// its answers lock, the ticket moves to ready and the next run is queued.
+func (o *Orchestrator) Submit(ctx context.Context, ticketID int64, n int) (AnswerResult, error) {
+	// Under tmu, only one submit completes the round, no answer lands after
+	// it, and settle sees either the open round or the resumed ticket.
+	o.tmu.Lock()
+	res, err := o.submitLocked(ctx, ticketID, n)
+	o.tmu.Unlock()
+	if err != nil {
+		return res, err
+	}
+	o.postRoundSummary(ctx, res.Ticket, res.Round)
+	// The pick is made: a prototype preview of this ticket has done its job.
+	if pv := o.Preview(); pv != nil && pv.TicketID == res.Ticket.ID {
+		o.StopPreview()
+	}
+	o.Kick()
+	return res, nil
+}
+
+// submitLocked is Submit's read-modify-write; the caller holds tmu.
+func (o *Orchestrator) submitLocked(ctx context.Context, ticketID int64, n int) (AnswerResult, error) {
+	var res AnswerResult
+	rd, err := o.st.Round(ctx, ticketID, n)
+	if err != nil {
+		return res, err
+	}
+	if rd.CompletedAt != nil {
+		return res, invalid("round %d is already complete", n)
+	}
+	if !questions.Complete(rd.Tree, rd.Answers) {
+		return res, invalid("round %d has unanswered questions", n)
+	}
+	t, err := o.st.Ticket(ctx, ticketID)
+	if err != nil {
+		return res, err
+	}
+	if t.WontDo() {
+		return res, invalid("the ticket is closed as won't do; reopen it first")
+	}
+	now := o.now()
+	rd.CompletedAt = &now
+	if err := o.st.SaveRound(ctx, rd); err != nil {
+		return res, err
+	}
+	if err := o.roundCompleted(ctx, &t, rd); err != nil {
+		return res, err
+	}
+	res.Round, res.Completed, res.Ticket = rd, true, t
 	return res, nil
 }
 
@@ -309,7 +334,7 @@ func checkAnswer(q domain.Question, a domain.Answer) error {
 	return nil
 }
 
-// roundCompleted resumes a ticket whose open round is now fully answered.
+// roundCompleted resumes a ticket whose open round was just submitted.
 // The caller holds tmu and passes the ticket's current row.
 func (o *Orchestrator) roundCompleted(ctx context.Context, t *domain.Ticket, rd domain.Round) error {
 	t.StatusNote = ""

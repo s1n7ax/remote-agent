@@ -114,6 +114,9 @@ func TestWontDoStopsActiveRun(t *testing.T) {
 	if _, err := h.o.Answer(h.ctx, tk.ID, 1, "ok", domain.Answer{OptionIDs: []string{"yes"}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("answer after won't do: err = %v", err)
 	}
+	if _, err := h.o.Submit(h.ctx, tk.ID, 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("submit after won't do: err = %v", err)
+	}
 	if cs := h.gh.commentsOn(60); len(cs) != 0 {
 		t.Fatalf("a reason comment was posted without a reason: %+v", cs)
 	}

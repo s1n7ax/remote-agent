@@ -9,12 +9,15 @@
     q,
     answer,
     onanswer,
+    ondraft,
     status,
     readonly = false,
   }: {
     q: Question;
     answer: Answer | undefined;
     onanswer: (a: Answer) => void;
+    /** Reports the answer being typed, before it is saved. */
+    ondraft?: (a: Answer) => void;
     status?: 'saving' | 'saved' | 'error';
     readonly?: boolean;
   } = $props();
@@ -48,15 +51,20 @@
     }
   }
 
+  /** The answer the typed text makes. */
+  function textAnswer(): Answer {
+    const t = text.trim() || undefined;
+    return { optionIds: q.kind === 'multi' ? picked : [], text: t };
+  }
+
   function commitText() {
     clearTimeout(timer);
-    const t = text.trim();
-    if (t === (answer?.text ?? '')) return;
-    if (q.kind === 'multi') onanswer({ optionIds: picked, text: t || undefined });
-    else onanswer({ optionIds: [], text: t || undefined });
+    if (text.trim() === (answer?.text ?? '')) return;
+    onanswer(textAnswer());
   }
 
   function oninput() {
+    ondraft?.(textAnswer());
     clearTimeout(timer);
     timer = setTimeout(commitText, 900);
   }
