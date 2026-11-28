@@ -9,6 +9,7 @@ import (
 
 	"github.com/s1n7ax/remote-agent/internal/domain"
 	"github.com/s1n7ax/remote-agent/internal/questions"
+	"github.com/s1n7ax/remote-agent/internal/store"
 )
 
 // ErrInvalid wraps a request the user (or agent) got wrong.
@@ -28,6 +29,8 @@ type NewTicket struct {
 	Prototypes bool             `json:"prototypes"`
 	Start      bool             `json:"start"`
 	StartAt    *time.Time       `json:"startAt"`
+	// Images are upload ids (UploadImage), attached as images 1..n.
+	Images []string `json:"images"`
 }
 
 // titleFrom derives a short title from the idea's first line.
@@ -63,12 +66,19 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if in.Start {
 		t.Status = domain.StatusReady
 	}
-	t, err = o.st.CreateTicket(ctx, t)
+	// The images go in with the ticket, so a ready ticket's first run
+	// never starts without them.
+	t, err = o.st.CreateTicketWithImages(ctx, t, in.Images)
+	switch {
+	case errors.Is(err, store.ErrTooManyImages):
+		return domain.Ticket{}, invalid("%v", err)
+	case errors.Is(err, store.ErrNotFound):
+		return t, invalid("an image upload is missing or expired; add the image again")
+	}
 	if err != nil {
 		return t, err
 	}
-	body := t.Idea + fmt.Sprintf("\n\n---\n_Tracked by remote-agent (ticket %d)._", t.ID)
-	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, body); err != nil {
+	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, issueBody(t, len(in.Images))); err != nil {
 		o.log.Warn("create issue", "ticket", t.ID, "err", err)
 		t.StatusNote = "could not create the GitHub issue: " + err.Error()
 	} else {
@@ -396,6 +406,7 @@ func (o *Orchestrator) DeleteTicket(ctx context.Context, id int64) error {
 		return fmt.Errorf("%w: stop it first", ErrBusy)
 	}
 	o.removeWorkspace(ctx, t)
+	o.removeImageFiles(ctx, id)
 	if err := o.st.DeleteTicket(ctx, id); err != nil {
 		return err
 	}

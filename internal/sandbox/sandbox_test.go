@@ -45,6 +45,10 @@ func TestCommandShape(t *testing.T) {
 	if !strings.Contains(s, "--ro-bind /r /r") || !strings.Contains(s, "--bind /w /w --bind /h /h --clearenv --chdir /w -- x") {
 		t.Errorf("workdir-only command:\n%s", s)
 	}
+	got, _ = Config{Workdir: "/w", NoNetwork: true}.Command([]string{"x"}, nil)
+	if s = strings.Join(got, " "); strings.Contains(s, "--share-net") || !strings.Contains(s, "--unshare-all") {
+		t.Errorf("NoNetwork command shares the network:\n%s", s)
+	}
 	argv, env := Config{}.Wrap()([]string{"x"}, nil)
 	if argv[0] == "x" || env == nil {
 		t.Error("misconfigured Wrap must not run the command unsandboxed")

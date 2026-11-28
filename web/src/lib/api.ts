@@ -21,6 +21,7 @@ import type {
   SkillSummary,
   Ticket,
   TicketDetail,
+  TicketImage,
   TicketInput,
   TicketPatch,
 } from './types';
@@ -43,11 +44,13 @@ export const fetchTransport: Transport = async (method, path, body) => {
   const headers: Record<string, string> = {};
   // The server rejects state-changing /api requests without this header (CSRF guard).
   if (method !== 'GET' && method !== 'HEAD') headers['X-Requested-With'] = 'remote-agent';
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  // FormData sets its own multipart Content-Type with the boundary.
+  const form = body instanceof FormData;
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : form ? body : JSON.stringify(body),
     credentials: 'same-origin',
   });
   if (!res.ok) {
@@ -100,6 +103,12 @@ function encPath(p: string): string {
 
 type Done<K extends string> = Record<K, boolean>;
 
+function imageForm(file: File): FormData {
+  const f = new FormData();
+  f.append('file', file, file.name);
+  return f;
+}
+
 export const api = {
   state: () => call<AppState>('GET', '/api/state'),
   login: (token: string) => call<{ ok: boolean }>('POST', '/api/login', { token }),
@@ -117,6 +126,10 @@ export const api = {
   ticket: (id: number) => call<TicketDetail>('GET', `/api/tickets/${id}`),
   patchTicket: (id: number, p: TicketPatch) => call<Ticket>('PATCH', `/api/tickets/${id}`, p),
   deleteTicket: (id: number) => call<Done<'deleted'>>('DELETE', `/api/tickets/${id}`),
+  /** Stores an image for a ticket about to be created; pass the id in TicketInput.images. */
+  uploadImage: (projectId: number, file: File) => call<{ id: string }>('POST', `/api/projects/${projectId}/uploads`, imageForm(file)),
+  addImage: (ticketId: number, file: File) => call<TicketImage>('POST', `/api/tickets/${ticketId}/images`, imageForm(file)),
+  removeImage: (ticketId: number, n: number) => call<Done<'removed'>>('DELETE', `/api/tickets/${ticketId}/images/${n}`),
   start: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/start`),
   pause: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/pause`),
   resume: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/resume`),
