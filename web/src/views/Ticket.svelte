@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import AgentPickers from '../components/AgentPickers.svelte';
   import Icon from '../components/Icon.svelte';
+  import ImagesPanel from '../components/ImagesPanel.svelte';
   import LogTab from '../components/LogTab.svelte';
   import Markdown from '../components/Markdown.svelte';
   import PrPanel from '../components/PrPanel.svelte';
@@ -12,6 +13,7 @@
   import { api, subscribe } from '../lib/api';
   import { app } from '../lib/app.svelte';
   import { clock, errorText, relative, toLocalInput, usd } from '../lib/format';
+  import { confirmStart } from '../lib/images';
   import { progress } from '../lib/questions';
   import { href, router } from '../lib/router.svelte';
   import { STATUS_LABEL, type Project, type PullRequest, type Round, type Ticket, type TicketDetail } from '../lib/types';
@@ -33,6 +35,7 @@
       d.rounds ??= [];
       d.runs ??= [];
       d.prototypes ??= [];
+      d.images ??= [];
       detail = d;
       error = null;
     } catch (e) {
@@ -116,6 +119,13 @@
     if (detail) detail.ticket = res ?? prev;
   }
 
+  // Starting a ticket whose model cannot see its images needs a confirm.
+  function start() {
+    if (!t || !detail) return;
+    if (!confirmStart(app.state, t.agent, t.model, detail.images.length)) return;
+    act(() => api.start(ticketId), 'Started');
+  }
+
   function openSchedule() {
     when = toLocalInput(t?.startAt);
     scheduling = true;
@@ -177,10 +187,10 @@
     </header>
 
     <section class="panel controls">
-      <AgentPickers agent={t.agent} model={t.model} effort={t.effort} onchange={patch} />
+      <AgentPickers agent={t.agent} model={t.model} effort={t.effort} images={detail.images.length} onchange={patch} />
       <div class="actions">
         {#if t.status === 'backlog'}
-          <button class="btn primary" type="button" disabled={busy} onclick={() => act(() => api.start(ticketId), 'Started')}><Icon name="play" size={16} /> Start</button>
+          <button class="btn primary" type="button" disabled={busy} onclick={start}><Icon name="play" size={16} /> Start</button>
           <button class="btn" type="button" disabled={busy} onclick={openSchedule}><Icon name="calendar" size={16} /> {t.startAt ? 'Reschedule' : 'Schedule'}</button>
         {/if}
         {#if live?.status === 'running'}
@@ -206,6 +216,10 @@
         {/if}
       </div>
     </section>
+
+    {#if t.kind !== 'job'}
+      <ImagesPanel {ticketId} bind:images={detail.images} />
+    {/if}
 
     <nav class="tabs" aria-label="Ticket sections">
       {#each tabs as x (x.id)}

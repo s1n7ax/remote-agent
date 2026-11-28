@@ -74,8 +74,8 @@ func (h *fakeHost) SubmitPrototypes(_ context.Context, r Run, ps []domain.Protot
 func (h *fakeHost) StartPreview(_ context.Context, r Run, p Preview) (string, error) {
 	return "https://preview/1", h.record(r, ToolStartPreview, p)
 }
-func (h *fakeHost) SubmitProof(_ context.Context, r Run, p Proof) error {
-	return h.record(r, ToolSubmitProof, p)
+func (h *fakeHost) SubmitProof(_ context.Context, r Run, p Proof) ([]string, error) {
+	return nil, h.record(r, ToolSubmitProof, p)
 }
 func (h *fakeHost) UploadArtifact(_ context.Context, r Run, path string) (domain.Artifact, error) {
 	return domain.Artifact{ID: "art1", Name: filepath.Base(path)}, h.record(r, ToolUploadArtifact, path)
@@ -392,8 +392,13 @@ func TestFileTools(t *testing.T) {
 	if p := e.host.last(t).arg.(Proof); p.Verdict != "PASS" || !slices.Equal(p.Files, []string{realShot}) {
 		t.Errorf("proof = %+v", p)
 	}
-	if _, isErr := callTool(t, cs, ToolSubmitProof, map[string]any{"verdict": "PASS", "report_markdown": "x", "files": []any{"link"}}); !isErr {
-		t.Error("proof with escaping file accepted")
+	// An escaping or missing file is never passed on, but does not block the proof.
+	text, isErr = callTool(t, cs, ToolSubmitProof, map[string]any{"verdict": "PASS", "report_markdown": "x", "files": []any{"link", "missing.png", shot}})
+	if isErr || !strings.Contains(text, "not stored") || !strings.Contains(text, "link") || !strings.Contains(text, "missing.png") {
+		t.Errorf("proof with escaping and missing files: %q isErr=%v", text, isErr)
+	}
+	if p := e.host.last(t).arg.(Proof); !slices.Equal(p.Files, []string{realShot}) {
+		t.Errorf("proof files = %v, want only %s", p.Files, realShot)
 	}
 	if _, isErr := callTool(t, cs, ToolSubmitProof, map[string]any{"verdict": "MAYBE", "report_markdown": "x"}); !isErr {
 		t.Error("bad verdict accepted")

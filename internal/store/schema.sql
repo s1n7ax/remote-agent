@@ -148,3 +148,26 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 	subscription TEXT NOT NULL,
 	created_at TIMESTAMP NOT NULL
 );
+
+-- Images the user uploaded in the New ticket sheet before the ticket exists.
+-- Creating the ticket moves them into artifacts and ticket_images; the rest
+-- are deleted after a day. The bytes live in <dataDir>/artifacts/<id>.
+CREATE TABLE IF NOT EXISTS uploads (
+	id TEXT PRIMARY KEY,
+	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	name TEXT NOT NULL,
+	mime TEXT NOT NULL,
+	size INTEGER NOT NULL,
+	created_at TIMESTAMP NOT NULL
+);
+
+-- A ticket's images, numbered in the order they were added. A removed image
+-- keeps its row (removed_at set) so its number is never reused.
+CREATE TABLE IF NOT EXISTS ticket_images (
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	n INTEGER NOT NULL,
+	artifact_id TEXT NOT NULL,
+	removed_at TIMESTAMP,
+	created_at TIMESTAMP NOT NULL,
+	PRIMARY KEY (ticket_id, n)
+);

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte';
+  import { blindWarning, seesImages } from '../lib/images';
   import type { AgentKind } from '../lib/types';
   import Chips from './Chips.svelte';
 
@@ -9,13 +10,18 @@
     effort,
     onchange,
     disabled = false,
+    images = 0,
   }: {
     agent: AgentKind;
     model: string;
     effort: string;
     onchange: (v: { agent: AgentKind; model: string; effort: string }) => void;
     disabled?: boolean;
+    /** How many images the ticket has (or will have); warns when the model cannot see them. */
+    images?: number;
   } = $props();
+
+  const blind = $derived(images > 0 && !seesImages(app.state, agent, model));
 
   const agents = $derived(app.agents);
   const info = $derived(agents.find((a) => a.kind === agent));
@@ -52,6 +58,7 @@
       value={effort}
       onchange={(e) => onchange({ agent, model, effort: e })} />
   </div>
+  {#if blind}<p class="warn" role="status">{blindWarning(images)}</p>{/if}
 </div>
 
 <style>
@@ -64,6 +71,14 @@
     grid-template-columns: 52px minmax(0, 1fr);
     align-items: center;
     gap: 8px;
+  }
+  .warn {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--r-m);
+    background: var(--attention-soft);
+    color: var(--attention-ink);
+    font-size: 0.86rem;
   }
   .k {
     font-size: 0.8rem;

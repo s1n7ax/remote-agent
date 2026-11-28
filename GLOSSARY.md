@@ -19,6 +19,10 @@ _Avoid_: cron, scheduled task
 **Schedule**:
 A cron expression and prompt that creates a job each time it fires.
 
+**Ticket image**:
+An image the user attached to a ticket, numbered in the order it was added, that every later run of the ticket can look at. It stays on the board and never goes to GitHub.
+_Avoid_: attachment, screenshot (screenshots are files a run uploads)
+
 **Stage**:
 The /ship step a ticket is in: explore, design, build, ci, fix, verify, merged or job.
 _Avoid_: phase, step
@@ -69,7 +73,7 @@ _Avoid_: container, VM
 ## Review
 
 **Proof**:
-A run's test evidence (verdict, report and screenshots) shown on the ticket and the PR.
+A run's test evidence (verdict, report and screenshots), shown in full on the ticket's Proof tab; the PR gets the report as text with a link to that tab, never the screenshots.
 _Avoid_: test report, evidence bundle
 
 **Prototype**:
