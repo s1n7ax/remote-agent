@@ -284,6 +284,15 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) error {
 	if proof, found, err := s.Store.LatestProof(ctx, id); err != nil {
 		return err
 	} else if found {
+		// Proofs stored before report images were linked at submit still
+		// point at checkout paths; match those to the proof's artifacts.
+		arts := make([]domain.Artifact, 0, len(proof.Files))
+		for _, id := range proof.Files {
+			if a, err := s.Store.Artifact(ctx, id); err == nil {
+				arts = append(arts, a)
+			}
+		}
+		proof.Report = orchestrator.ResolveProofImages(proof.Report, arts)
 		out["proof"] = proof
 	}
 	if pv := s.Orch.Preview(); pv != nil && pv.TicketID == id {

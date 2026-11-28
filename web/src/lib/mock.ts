@@ -420,7 +420,7 @@ const proofs: Record<number, Proof> = {
     createdAt: ago(40),
     files: ['shot-board', 'shot-card'],
     report:
-      '## Verify report\n\n| Check | Result |\n| --- | --- |\n| Card shows check names | pass |\n| Long names truncate at 2 lines | pass |\n| Dark theme contrast ≥ 4.5:1 | pass |\n\nRan `npm run check`, `npm test`, `go test ./...` — all green.\n\nScreenshots taken at 390×844 against the fake GitHub.',
+      '## Verify report\n\n| Check | Result |\n| --- | --- |\n| Card shows check names | pass |\n| Long names truncate at 2 lines | pass |\n| Dark theme contrast ≥ 4.5:1 | pass |\n\nRan `npm run check`, `npm test`, `go test ./...` — all green.\n\n| Before | After |\n| ------ | ----- |\n| ![screenshot](/api/artifacts/shot-board) | ![screenshot](/api/artifacts/shot-card) |\n| ![screenshot](.ship/ci-names/verify/1/2-before.png) | _No screenshot._ |\n\nScreenshots taken at 390×844 against the fake GitHub.',
   },
 };
 

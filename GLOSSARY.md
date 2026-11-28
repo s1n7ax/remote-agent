@@ -65,7 +65,7 @@ _Avoid_: container, VM
 ## Review
 
 **Proof**:
-A run's test evidence (verdict, report and screenshots) shown on the ticket and the PR.
+A run's test evidence (verdict, report and screenshots), shown in full on the ticket's Proof tab; the PR gets the report as text with a link to that tab, never the screenshots.
 _Avoid_: test report, evidence bundle
 
 **Prototype**:

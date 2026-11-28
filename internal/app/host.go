@@ -56,7 +56,7 @@ func (h *Host) StartPreview(ctx context.Context, run mcpserver.Run, p mcpserver.
 }
 
 // SubmitProof implements mcpserver.Host.
-func (h *Host) SubmitProof(ctx context.Context, run mcpserver.Run, p mcpserver.Proof) error {
+func (h *Host) SubmitProof(ctx context.Context, run mcpserver.Run, p mcpserver.Proof) ([]string, error) {
 	return h.O.ToolSubmitProof(ctx, run.ID, p.Verdict, p.Report, p.Files)
 }
 

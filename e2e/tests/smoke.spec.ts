@@ -81,7 +81,23 @@ test('a ticket goes from idea to merged', async ({ page, request }) => {
   await expect(page.getByText('Greeting present')).toBeVisible();
   await expect(page.getByRole('img').first()).toHaveJSProperty('complete', true);
   expect(await page.getByRole('img').first().evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
+  // The report's screenshot shows inline in its table; the one that was never
+  // stored shows a placeholder instead of a broken image.
+  const inline = page.locator('.report table img');
+  await expect(inline).toHaveCount(1);
+  await expect(inline).toHaveJSProperty('complete', true);
+  expect(await inline.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
+  await expect(page.locator('.report table').getByText('Screenshot unavailable')).toBeVisible();
   await page.screenshot({ path: 'test-results/proof.png', fullPage: true });
+  await page.locator('.report table').getByRole('button', { name: 'Zoom screenshot' }).click();
+  await expect(page.getByRole('img', { name: 'Screenshot enlarged' })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('img', { name: 'Screenshot enlarged' })).toHaveCount(0);
+  await expect(page.getByText('Greeting present')).toBeVisible();
+  // The PR's proof comment stays text-only and links to the Proof tab.
+  const comment = ((await github(request)).comments ?? []).map((c: { body: string }) => c.body).join('\n');
+  expect(comment).toContain(`/#/p/${project.id}/t/${id}/proof`);
+  expect(comment).not.toContain('![');
 
   await page.goto(`/#/p/${project.id}/t/${id}/pr`);
   await page.getByRole('button', { name: 'Merge…' }).click();
