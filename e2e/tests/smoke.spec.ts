@@ -60,13 +60,19 @@ test('a ticket goes from idea to merged', async ({ page, request }) => {
   await page.getByText('A new file').click();
   await expect(page.getByText('Which file name?')).toBeVisible();
   await page.getByText('Casual').click();
-  expect((await ticket(request, id)).status).toBe('needs_input');
+  const submit = page.getByRole('button', { name: 'Submit', exact: true });
+  await expect(submit).toBeDisabled();
+  // Typed text unlocks Submit before it is saved, and tapping Submit saves it.
   await page.getByRole('textbox', { name: 'Which file name?' }).fill('HELLO.md');
-  await page.getByRole('textbox', { name: 'Which file name?' }).blur();
+  await expect(submit).toBeEnabled();
+  expect((await ticket(request, id)).status).toBe('needs_input');
+  await submit.click();
 
-  // Round 2 (design) arrives once round 1 is answered.
+  // Round 2 (design) arrives once round 1 is submitted.
   await expect(page.getByText('Build it as described?')).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: 'Yes, that’s right' }).click();
+  await expect(submit).toBeEnabled();
+  await submit.click();
 
   // The app builds, opens a PR, waits for CI, verifies and marks it ready.
   await expect.poll(async () => (await ticket(request, id)).status, { timeout: 60_000 }).toBe('in_review');

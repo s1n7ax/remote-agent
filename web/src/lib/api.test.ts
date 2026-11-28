@@ -109,7 +109,7 @@ describe('mock transport', () => {
     expect((await api.addImage(t.id, png('d.png'))).n).toBe(4);
   });
 
-  it('completes round 2 once every visible question is answered', async () => {
+  it('completes round 2 only on submit, once every visible question is answered', async () => {
     setTransport(mockTransport);
     const d = await api.ticket(101);
     const r2 = d.rounds.find((r) => r.n === 2)!;
@@ -117,10 +117,16 @@ describe('mock transport', () => {
     let res = await api.answer(101, 2, 'confirm', { optionIds: ['yes'] });
     expect(res.completed).toBe(false);
     res = await api.answer(101, 2, 'proto', { optionIds: ['a'] });
+    await expect(api.submitRound(101, 2)).rejects.toThrow('unanswered questions');
     res = await api.answer(101, 2, 'marks', { optionIds: ['count'] });
+    expect(res.completed).toBe(false);
+    expect(res.ticket.status).toBe('needs_input');
+    res = await api.submitRound(101, 2);
     expect(res.completed).toBe(true);
     expect(res.ticket.status).toBe('ready');
     expect(res.ticket.stage).toBe('build');
+    await expect(api.submitRound(101, 2)).rejects.toThrow('already complete');
+    await expect(api.answer(101, 2, 'marks', { optionIds: ['count'] })).rejects.toThrow('already complete');
   });
 });
 
@@ -134,6 +140,7 @@ describe('routes', () => {
     await api.setNotifications({ pr_ready: false });
     await api.merge(1, 52);
     await api.startPreview(101, 'A');
+    await api.submitRound(7, 2);
     expect(calls.map((c) => `${c.init.method} ${c.url} ${c.init.body ?? ''}`)).toEqual([
       'PATCH /api/schedules/3 {"enabled":false}',
       'DELETE /api/schedules/3 ',
@@ -142,6 +149,7 @@ describe('routes', () => {
       'PUT /api/notifications {"prefs":{"pr_ready":false}}',
       'POST /api/projects/1/pulls/52/merge {}',
       'POST /api/tickets/101/preview {"prototype":"A"}',
+      'POST /api/tickets/7/rounds/2/submit ',
     ]);
   });
 });

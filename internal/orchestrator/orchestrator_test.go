@@ -90,23 +90,34 @@ func TestExploreQuestionsAnsweredAdvanceToDesign(t *testing.T) {
 	if _, err := h.o.Answer(h.ctx, tk.ID, 1, "scope", domain.Answer{OptionIDs: []string{"nope"}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown option: err = %v", err)
 	}
-	if res := answer("scope", domain.Answer{OptionIDs: []string{"ui"}}); res.Completed {
-		t.Fatal("round complete after one of three visible answers")
+	answer("scope", domain.Answer{OptionIDs: []string{"ui"}})
+	answer("ok", domain.Answer{OptionIDs: []string{"yes"}})
+	if _, err := h.o.Submit(h.ctx, tk.ID, 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("submit while the visible 'screens' question is unanswered: err = %v", err)
 	}
-	if res := answer("ok", domain.Answer{OptionIDs: []string{"yes"}}); res.Completed {
-		t.Fatal("round complete while the visible 'screens' question is unanswered")
+	// The hidden "why" question is never answered.
+	if res := answer("screens", domain.Answer{Text: "settings"}); res.Completed {
+		t.Fatal("the last visible answer completed the round without Submit")
 	}
 	h.noRun(50 * time.Millisecond)
 	if got := h.ticket(tk.ID).Status; got != domain.StatusNeedsInput {
-		t.Fatalf("status after partial answers = %s", got)
+		t.Fatalf("status with every answer saved but not submitted = %s", got)
 	}
-	// The hidden "why" question is never answered.
-	res := answer("screens", domain.Answer{Text: "settings"})
-	if !res.Completed || res.Ticket.Status != domain.StatusReady || res.Ticket.Stage != domain.StageDesign {
-		t.Fatalf("after the last visible answer: completed=%v ticket=%s/%s", res.Completed, res.Ticket.Status, res.Ticket.Stage)
+	if rd, _ := h.o.OpenRound(h.ctx, tk.ID); rd == nil || rd.N != 1 || rd.Answers["screens"].Text != "settings" {
+		t.Fatalf("open round before submit = %+v", rd)
+	}
+	if len(h.gh.commentsOn(tk.Issue)) != 0 {
+		t.Fatal("round summary posted before submit")
+	}
+	res, err := h.o.Submit(h.ctx, tk.ID, 1)
+	if err != nil || !res.Completed || res.Ticket.Status != domain.StatusReady || res.Ticket.Stage != domain.StageDesign {
+		t.Fatalf("submit: %+v, %v", res, err)
 	}
 	if _, err := h.o.Answer(h.ctx, tk.ID, 1, "screens", domain.Answer{Text: "x"}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("answer on a completed round: err = %v", err)
+		t.Fatalf("answer on a submitted round: err = %v", err)
+	}
+	if _, err := h.o.Submit(h.ctx, tk.ID, 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("second submit: err = %v", err)
 	}
 	if len(h.gh.commentsOn(tk.Issue)) != 1 {
 		t.Fatalf("issue comments = %+v, want the round summary", h.gh.commentsOn(tk.Issue))
@@ -139,10 +150,7 @@ func TestRoundAnsweredBeforeRunEnds(t *testing.T) {
 	if _, err := h.o.ToolSubmitQuestions(h.ctx, r.ID(), tree, domain.PurposeRequirement); err != nil {
 		t.Fatal(err)
 	}
-	res, err := h.o.Answer(h.ctx, tk.ID, 1, "ok", domain.Answer{OptionIDs: []string{"yes"}})
-	if err != nil || !res.Completed {
-		t.Fatalf("answer = %+v, %v", res, err)
-	}
+	h.answerAndSubmit(tk.ID, 1, "ok", domain.Answer{OptionIDs: []string{"yes"}})
 	r.Sess.Finish(agent.Event{Summary: "posted"})
 
 	r2 := h.nextRun()
@@ -686,9 +694,16 @@ func TestSpendCapRound(t *testing.T) {
 	if _, err := h.o.Answer(h.ctx, tk.ID, rd.N, "cap", domain.Answer{Text: "whatever"}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("free text on the cap question: err = %v", err)
 	}
-	res, err := h.o.Answer(h.ctx, tk.ID, rd.N, "cap", domain.Answer{OptionIDs: []string{"raise"}})
+	if _, err := h.o.Answer(h.ctx, tk.ID, rd.N, "cap", domain.Answer{OptionIDs: []string{"raise"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.ticket(tk.ID); got.SpendCapUSD == 6 || got.Status != domain.StatusNeedsInput {
+		t.Fatalf("the cap choice took effect before submit: cap %v status %s", got.SpendCapUSD, got.Status)
+	}
+	h.noRun(50 * time.Millisecond)
+	res, err := h.o.Submit(h.ctx, tk.ID, rd.N)
 	if err != nil || !res.Completed {
-		t.Fatalf("raise = %+v, %v", res, err)
+		t.Fatalf("submit raise = %+v, %v", res, err)
 	}
 	if res.Ticket.SpendCapUSD != 6 {
 		t.Fatalf("raised cap = %v, want 6", res.Ticket.SpendCapUSD)
@@ -705,9 +720,7 @@ func TestSpendCapRound(t *testing.T) {
 	h.waitState(tk.ID, domain.StatusNeedsInput, domain.StageExplore)
 	h.waitInactive(tk.ID)
 	rd, _ = h.o.OpenRound(h.ctx, tk.ID)
-	if _, err := h.o.Answer(h.ctx, tk.ID, rd.N, "cap", domain.Answer{OptionIDs: []string{"stop"}}); err != nil {
-		t.Fatal(err)
-	}
+	h.answerAndSubmit(tk.ID, rd.N, "cap", domain.Answer{OptionIDs: []string{"stop"}})
 	got = h.waitState(tk.ID, domain.StatusBacklog, domain.StageExplore)
 	if got.StatusNote != "stopped at the spend cap" || got.SpendCapUSD != 6 {
 		t.Fatalf("after stop: note %q cap %v", got.StatusNote, got.SpendCapUSD)
@@ -733,9 +746,7 @@ func TestDailySpendCapBeforeStart(t *testing.T) {
 	}
 	h.noRun(50 * time.Millisecond)
 	rd, _ := h.o.OpenRound(h.ctx, tk.ID)
-	if _, err := h.o.Answer(h.ctx, tk.ID, rd.N, "cap", domain.Answer{OptionIDs: []string{"raise"}}); err != nil {
-		t.Fatal(err)
-	}
+	h.answerAndSubmit(tk.ID, rd.N, "cap", domain.Answer{OptionIDs: []string{"raise"}})
 	if c := h.o.dailyCap(h.ctx); c != 6 {
 		t.Fatalf("daily cap after raise = %v, want 6", c)
 	}
