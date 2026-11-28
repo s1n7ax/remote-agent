@@ -107,9 +107,31 @@ func (s *Store) UpdateTicket(ctx context.Context, t *domain.Ticket) error {
 	return nil
 }
 
-// DeleteTicket removes a ticket.
+// DeleteTicket removes a ticket and its own links. A dependency of another
+// ticket on it stays, marked deleted with the ticket's title and issue, so
+// that ticket keeps waiting; a related link to it goes.
 func (s *Store) DeleteTicket(ctx context.Context, id int64) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM tickets WHERE id = ?`, id); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete ticket: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	steps := []struct {
+		q    string
+		args []any
+	}{
+		{`UPDATE ticket_links SET deleted = 1,
+			to_title = (SELECT title FROM tickets WHERE id = ?), to_issue = (SELECT issue FROM tickets WHERE id = ?)
+			WHERE to_id = ? AND deleted = 0 AND kind = ?`, []any{id, id, id, domain.LinkDependsOn}},
+		{`DELETE FROM ticket_links WHERE to_id = ? AND deleted = 0 AND kind = ?`, []any{id, domain.LinkRelated}},
+		{`DELETE FROM tickets WHERE id = ?`, []any{id}},
+	}
+	for _, st := range steps {
+		if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {
+			return fmt.Errorf("delete ticket: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete ticket: %w", err)
 	}
 	return nil

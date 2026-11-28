@@ -1,5 +1,6 @@
 <script lang="ts">
   import { artifactUrl } from '../lib/api';
+  import Icon from './Icon.svelte';
   import ImageZoom from './ImageZoom.svelte';
 
   let {

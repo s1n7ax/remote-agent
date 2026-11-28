@@ -27,6 +27,7 @@ import type {
   SkillSummary,
   Status,
   Ticket,
+  TicketLink,
 } from './types';
 import { STATUSES } from './types';
 
@@ -555,6 +556,42 @@ function find<T>(xs: T[], pred: (x: T) => boolean, what: string): T {
   return x;
 }
 
+// Stored links: `from` depends on `to`, or the two are related.
+type MockLink = { id: number; from: number; to: number; kind: 'depends_on' | 'related' };
+const links: MockLink[] = [];
+let nextLink = 1;
+
+function linksOf(id: number): TicketLink[] {
+  return links
+    .filter((l) => l.from === id || l.to === id)
+    .map((l) => {
+      const otherId = l.from === id ? l.to : l.from;
+      const o = tickets.find((x) => x.id === otherId);
+      const kind = l.from === id || l.kind === 'related' ? l.kind : 'blocks';
+      return o
+        ? { id: l.id, kind, ticketId: o.id, title: o.title, issue: o.issue, status: o.status, statusNote: o.statusNote }
+        : { id: l.id, kind, ticketId: otherId, title: `ticket ${otherId}`, deleted: true };
+    });
+}
+
+function addMockLink(id: number, to: number, kind: string) {
+  const t = find(tickets, (x) => x.id === id, 'ticket');
+  const o = tickets.find((x) => x.id === to);
+  if (!o) throw new ApiError(400, `invalid request: ticket ${to} does not exist`);
+  if (to === id) throw new ApiError(400, 'invalid request: a ticket cannot depend on itself');
+  if (o.projectId !== t.projectId) throw new ApiError(400, 'invalid request: links are only between tickets of the same project');
+  if (o.kind === 'job' || t.kind === 'job') throw new ApiError(400, 'invalid request: jobs (scheduled runs) cannot have links');
+  if (kind === 'related') {
+    links.push({ id: nextLink++, from: id, to, kind: 'related' });
+    return;
+  }
+  const [from, dep] = kind === 'blocks' ? [to, id] : [id, to];
+  const reach = (a: number, seen = new Set<number>()): boolean =>
+    a === from || links.some((l) => l.kind === 'depends_on' && l.from === a && !seen.has(l.to) && (seen.add(l.to), reach(l.to, seen)));
+  if (reach(dep)) throw new ApiError(400, 'invalid request: that would make a dependency loop');
+  links.push({ id: nextLink++, from, to: dep, kind: 'depends_on' });
+}
+
 function detail(id: number) {
   const t = find(tickets, (x) => x.id === id, 'ticket');
   const out: Record<string, unknown> = {
@@ -562,6 +599,7 @@ function detail(id: number) {
     rounds: rounds.filter((r) => r.ticketId === id).sort((a, b) => a.n - b.n),
     runs: runs.filter((r) => r.ticketId === id),
     prototypes: prototypes[id] ?? [],
+    links: linksOf(id),
     images: (images[id] ?? []).filter((im) => !im.removed).map(({ removed: _, ...im }) => im),
   };
   if (proofs[id]) out.proof = proofs[id];
@@ -673,8 +711,20 @@ on('POST', '/api/projects/(\\d+)/tickets', (m, b) => {
     attach(t.id, uploads[id]);
     delete uploads[id];
   }
+  for (const to of b.dependsOn ?? []) addMockLink(t.id, to, 'depends_on');
+  for (const to of b.related ?? []) addMockLink(t.id, to, 'related');
   emit({ type: 'board', projectId: t.projectId });
   return t;
+});
+on('POST', '/api/tickets/(\\d+)/links', (m, b) => {
+  addMockLink(+m[1], +b.to, b.kind);
+  return { links: linksOf(+m[1]) };
+});
+on('DELETE', '/api/tickets/(\\d+)/links/(\\d+)', (m) => {
+  const i = links.findIndex((l) => l.id === +m[2]);
+  if (i < 0) throw new ApiError(404, 'link not found');
+  links.splice(i, 1);
+  return { links: linksOf(+m[1]) };
 });
 on('POST', '/api/projects/(\\d+)/uploads', (_m, b) => {
   const im = storeImage(b);

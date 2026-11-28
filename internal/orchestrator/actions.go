@@ -31,6 +31,22 @@ type NewTicket struct {
 	StartAt    *time.Time       `json:"startAt"`
 	// Images are upload ids (UploadImage), attached as images 1..n.
 	Images []string `json:"images"`
+	// DependsOn and Related are tickets of the same project to link the
+	// new ticket to.
+	DependsOn []int64 `json:"dependsOn"`
+	Related   []int64 `json:"related"`
+}
+
+// links lists the new ticket's links.
+func (in NewTicket) links() []NewLink {
+	var out []NewLink
+	for _, id := range in.DependsOn {
+		out = append(out, NewLink{To: id, Kind: domain.LinkDependsOn})
+	}
+	for _, id := range in.Related {
+		out = append(out, NewLink{To: id, Kind: domain.LinkRelated})
+	}
+	return out
 }
 
 // titleFrom derives a short title from the idea's first line.
@@ -51,11 +67,24 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if err != nil {
 		return domain.Ticket{}, err
 	}
+	// It is created in the backlog with no start time, so the scheduler
+	// cannot start it before its links exist.
 	t := domain.Ticket{
 		ProjectID: p.ID, Kind: domain.KindTicket, Idea: strings.TrimSpace(in.Idea), Title: strings.TrimSpace(in.Title),
 		Status: domain.StatusBacklog, Stage: domain.StageExplore,
-		Agent: in.Agent, Model: in.Model, Effort: in.Effort, Prototypes: in.Prototypes, StartAt: in.StartAt,
+		Agent: in.Agent, Model: in.Model, Effort: in.Effort, Prototypes: in.Prototypes,
 		SpendCapUSD: o.DefaultTicketCap(ctx),
+	}
+	links := in.links()
+	seen := map[NewLink]bool{}
+	for _, l := range links {
+		if seen[l] {
+			return domain.Ticket{}, invalid("ticket %d is listed twice", l.To)
+		}
+		seen[l] = true
+		if _, err := o.linkTarget(ctx, t, l); err != nil {
+			return domain.Ticket{}, err
+		}
 	}
 	if t.Title == "" {
 		t.Title = titleFrom(t.Idea)
@@ -63,11 +92,8 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if t.Agent == "" {
 		t.Agent, t.Model, t.Effort = p.Agent, p.Model, p.Effort
 	}
-	if in.Start {
-		t.Status = domain.StatusReady
-	}
-	// The images go in with the ticket, so a ready ticket's first run
-	// never starts without them.
+	// The images go in with the ticket, so its first run never starts
+	// without them.
 	t, err = o.st.CreateTicketWithImages(ctx, t, in.Images)
 	switch {
 	case errors.Is(err, store.ErrTooManyImages):
@@ -78,6 +104,9 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if err != nil {
 		return t, err
 	}
+	if err := o.addNewLinks(ctx, t, links); err != nil {
+		return t, err
+	}
 	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, issueBody(t, len(in.Images))); err != nil {
 		o.log.Warn("create issue", "ticket", t.ID, "err", err)
 		t.StatusNote = "could not create the GitHub issue: " + err.Error()
@@ -85,14 +114,24 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 		t.Issue = n
 	}
 	issue, note := t.Issue, t.StatusNote
-	// The scheduler may have picked the new ticket up already.
 	if t, err = o.mutate(ctx, t.ID, func(c *domain.Ticket) {
 		c.Issue = issue
 		if note != "" {
 			c.StatusNote = note
 		}
+		c.StartAt = in.StartAt
+		if in.Start {
+			c.Status = domain.StatusReady
+		}
 	}); err != nil {
 		return t, err
+	}
+	if len(links) > 0 {
+		ids := []int64{t.ID}
+		for _, l := range links {
+			ids = append(ids, l.To)
+		}
+		o.linksChanged(ctx, ids...)
 	}
 	o.bus.Publish(Message{Type: "board", ProjectID: p.ID})
 	o.Kick()
@@ -405,11 +444,27 @@ func (o *Orchestrator) DeleteTicket(ctx context.Context, id int64) error {
 	if ar := o.activeFor(id); ar != nil {
 		return fmt.Errorf("%w: stop it first", ErrBusy)
 	}
+	links, err := o.st.TicketLinks(ctx, id)
+	if err != nil {
+		return err
+	}
 	o.removeWorkspace(ctx, t)
 	o.removeImageFiles(ctx, id)
-	if err := o.st.DeleteTicket(ctx, id); err != nil {
+	// Under linkMu, so no link to the ticket is added while it goes.
+	o.linkMu.Lock()
+	err = o.st.DeleteTicket(ctx, id)
+	o.linkMu.Unlock()
+	if err != nil {
 		return err
 	}
 	o.bus.Publish(Message{Type: "board", ProjectID: t.ProjectID})
+	// The linked tickets' issues and cards now show it as deleted or gone.
+	ids := []int64{}
+	for _, l := range links {
+		if !l.Deleted {
+			ids = append(ids, l.TicketID)
+		}
+	}
+	o.linksChanged(ctx, ids...)
 	return nil
 }

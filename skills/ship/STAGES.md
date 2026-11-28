@@ -15,6 +15,7 @@ The orchestrator prepares the run's world before it sends the first message:
    | `.ship/<goal>/decisions/decisions.md`    | latest `submit_decisions` markdown                                               | design       |
    | `.ship/<goal>/rounds/<n>.json`           | `{ "tree": <submitted tree>, "answers": { "<qid>": {optionIds, text} } }`, visible questions only | after round n is answered |
    | `.ship/<goal>/prototypes.json`           | the latest `submit_prototypes` list, plus `"picked": "<name>"` once answered     | design (prototypes) |
+   | `.ship/<goal>/links/<ticketId>.md`       | one per dependency and related ticket: its issue, status, branch, and requirement (or idea before it has one) | when the ticket has links |
    | `.ship/<goal>/images/<n>.<ext>`          | the ticket's images as they are when the run starts (`jpg` `png` `gif` `webp`); the directory is emptied first, so a removed image is gone | when the ticket has images |
 
    Everything else under `.ship/<goal>/` (`code-review/`, `verification/`, `verify/`, `prototypes/<name>/` worktrees) is written by runs and must survive between runs.
@@ -45,12 +46,20 @@ You cannot reach the user except through the app's MCP tools. Report the stage's
 - prototypes: no                            [or: yes, <count|2–3>]
 - critical: no                              [or: yes]
 - review effort: medium                     [or the ticket's level]
+[- update from base: yes — <#A, …> merged after this branch was cut; merge origin/<baseBranch> into the goal branch first]
 [- resumed: <reason: follow_up answered | retry after failure | account switch | user resume>]
 
 [## Why the last run stopped
 
 Your previous run of this stage stopped before it finished: <the run's error>.
 Continue the stage from where it stopped; do not redo work the checkout and .ship/<goal>/ already show.]
+
+[## Linked tickets
+
+Set by the user; read each one's file. A dependency is merged before this ticket runs; a related ticket is context only.
+
+- depends on <#A> — <title> (<status>): .ship/<goal>/links/<ticketId>.md
+- related to <#C> — <title> (<status>): .ship/<goal>/links/<ticketId>.md]
 
 [## Idea
 
@@ -104,6 +113,8 @@ Round <n> (<purpose>) — full tree and answers: .ship/<goal>/rounds/<n>.json
 | `job`     | —    | —                                                 | —       | yes | `goal`, `goal branch`, `issue`, `pull request`, `next round`, `prototypes`, `critical` are omitted |
 
 Answers list visible questions only, in tree order; a hidden question's answer is never sent.
+
+`## Linked tickets` is sent to every non-job stage when the ticket has dependencies or related tickets. A ticket runs no stage while a dependency is not merged, so every listed dependency is `done`. `update from base` is set on the first run after a dependency that was added once the goal branch existed has merged, in any stage.
 
 `## Images` is sent to every stage of a ticket that has images, never to a job. Numbers are never reused: after image 2 of 3 is removed the list is 1 and 3. An image added while a run is working reaches the next run only.
 

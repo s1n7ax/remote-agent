@@ -28,6 +28,8 @@
     <p class="note">Starts {relative(t.startAt)} <span class="muted">({clock(t.startAt)})</span></p>
   {:else if t.statusNote && t.status === 'failed'}
     <p class="note bad">{t.statusNote}</p>
+  {:else if t.statusNote?.startsWith('waiting on ') && t.status === 'ready'}
+    <p class="note">{t.statusNote}</p>
   {/if}
 </a>
 

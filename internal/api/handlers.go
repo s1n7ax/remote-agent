@@ -289,11 +289,15 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	links, err := s.Store.TicketLinks(ctx, id)
+	if err != nil {
+		return err
+	}
 	images, err := s.Store.TicketImages(ctx, id)
 	if err != nil {
 		return err
 	}
-	out := map[string]any{"ticket": t, "rounds": rounds, "runs": runs, "prototypes": protos, "images": images}
+	out := map[string]any{"ticket": t, "rounds": rounds, "runs": runs, "prototypes": protos, "links": links, "images": images}
 	if proof, found, err := s.Store.LatestProof(ctx, id); err != nil {
 		return err
 	} else if found {
@@ -369,6 +373,38 @@ func (s *Server) ticketAction(action string) func(w http.ResponseWriter, r *http
 		}
 		return ok(w, t)
 	}
+}
+
+func (s *Server) addLink(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in orchestrator.NewLink
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	links, err := s.Orch.AddLink(r.Context(), id, in)
+	if err != nil {
+		return err
+	}
+	return ok(w, map[string]any{"links": links})
+}
+
+func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	lid, err := pathID(r, "lid")
+	if err != nil {
+		return err
+	}
+	links, err := s.Orch.RemoveLink(r.Context(), id, lid)
+	if err != nil {
+		return err
+	}
+	return ok(w, map[string]any{"links": links})
 }
 
 func (s *Server) message(w http.ResponseWriter, r *http.Request) error {

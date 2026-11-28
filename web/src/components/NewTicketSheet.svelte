@@ -5,9 +5,10 @@
   import { errorText } from '../lib/format';
   import { confirmStart, filesOf, pastedFiles, prepareImage, refusal } from '../lib/images';
   import { router } from '../lib/router.svelte';
-  import type { AgentKind, Project } from '../lib/types';
+  import type { AgentKind, LinkKind, Project, Ticket, TicketLink } from '../lib/types';
   import AgentPickers from './AgentPickers.svelte';
   import Icon from './Icon.svelte';
+  import LinkEditor from './LinkEditor.svelte';
   import Sheet from './Sheet.svelte';
 
   let { open = $bindable(false), project, oncreated }: { open?: boolean; project: Project; oncreated: () => void } = $props();
@@ -19,6 +20,17 @@
   let effort = $derived(project.effort);
   let prototypes = $state(false);
   let busy = $state(false);
+  // Links to add with the ticket; ids are local only.
+  let links = $state<TicketLink[]>([]);
+  let nextLinkId = 1;
+
+  function addLink(t: Ticket, kind: LinkKind) {
+    links.push({ id: nextLinkId++, kind, ticketId: t.id, title: t.title, issue: t.issue, status: t.status });
+  }
+
+  function removeLink(l: TicketLink) {
+    links = links.filter((x) => x !== l);
+  }
 
   // Images upload as soon as they are added; the ticket is created with the
   // ids of the ones that made it. A failed one stays with a Retry.
@@ -94,7 +106,18 @@
     busy = true;
     const images = queued.map((q) => q.id!);
     const t = await app.attempt(
-      () => api.createTicket(project.id, { idea: idea.trim(), agent, model, effort, prototypes, start, images }),
+      () =>
+        api.createTicket(project.id, {
+          idea: idea.trim(),
+          agent,
+          model,
+          effort,
+          prototypes,
+          start,
+          images,
+          dependsOn: links.filter((l) => l.kind === 'depends_on').map((l) => l.ticketId),
+          related: links.filter((l) => l.kind === 'related').map((l) => l.ticketId),
+        }),
       start ? 'Ticket created and started' : 'Ticket created in backlog',
     );
     busy = false;
@@ -102,6 +125,7 @@
     idea = '';
     clearQueue();
     prototypes = false;
+    links = [];
     ({ agent, model, effort } = project);
     open = false;
     oncreated();
@@ -156,6 +180,12 @@
       <span class="muted small">Build 2–3 options with screenshots and a live preview to pick from.</span>
     </span>
   </label>
+  {#if open}
+    <div class="field">
+      Links
+      <LinkEditor projectId={project.id} {links} kinds={['depends_on', 'related']} onadd={addLink} onremove={removeLink} />
+    </div>
+  {/if}
   {#snippet footer()}
     <button class="btn grow" type="button" disabled={busy || uploading || failed || !idea.trim()} onclick={() => create(false)}>Create</button>
     <button class="btn primary grow" type="button" disabled={busy || uploading || failed || !idea.trim()} onclick={() => create(true)}>Create &amp; start</button>
@@ -163,6 +193,13 @@
 </Sheet>
 
 <style>
+  .field {
+    display: grid;
+    gap: 6px;
+    font-size: 0.86rem;
+    color: var(--ink-2);
+    font-weight: 500;
+  }
   .drop,
   .images {
     display: grid;

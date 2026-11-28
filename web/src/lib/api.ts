@@ -23,7 +23,9 @@ import type {
   TicketDetail,
   TicketImage,
   TicketInput,
+  TicketLink,
   TicketPatch,
+  LinkKind,
 } from './types';
 
 /** An HTTP error from the API; `message` is the server's `error` field when present. */
@@ -137,6 +139,10 @@ export const api = {
   retry: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/retry`),
   answer: (id: number, round: number, qid: string, a: Answer) =>
     call<AnswerResult>('PUT', `/api/tickets/${id}/rounds/${round}/answers/${e(qid)}`, a),
+  addLink: (id: number, to: number, kind: LinkKind) =>
+    call<{ links: TicketLink[] | null }>('POST', `/api/tickets/${id}/links`, { to, kind }),
+  removeLink: (id: number, linkId: number) =>
+    call<{ links: TicketLink[] | null }>('DELETE', `/api/tickets/${id}/links/${linkId}`),
   message: (id: number, text: string) => call<Done<'sent'>>('POST', `/api/tickets/${id}/message`, { text }),
   /** Run log in ascending id order, `limit` events after event id `after`. */
   runEvents: (ticketId: number, runId: number, opts: { after?: number; limit?: number } = {}) => {

@@ -31,6 +31,14 @@ _Avoid_: phase, step
 Where a ticket sits on the board: backlog, needs input, ready, working, waiting, ready for testing, in review, done or failed.
 _Avoid_: column, state
 
+**Dependency**:
+A link saying one ticket may not run any stage until another ticket of the same project is done (its PR merged); "B depends on A", "A blocks B".
+_Avoid_: blocker, prerequisite, parent
+
+**Related ticket**:
+A two-way link between two tickets of the same project that is only a cross-reference and never holds either back.
+_Avoid_: linked issue, see-also
+
 ## Questions
 
 **Round**:

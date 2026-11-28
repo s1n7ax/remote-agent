@@ -51,14 +51,18 @@ func nextStage(s domain.Stage) domain.Stage {
 
 // TicketContext is what a run learns about its ticket.
 type TicketContext struct {
-	Ticket     domain.Ticket      `json:"ticket"`
-	Project    domain.Project     `json:"project"`
-	Rounds     []domain.Round     `json:"rounds"`
-	Prototypes []domain.Prototype `json:"prototypes"`
-	Proof      *domain.Proof      `json:"proof,omitempty"`
+	Ticket     domain.Ticket       `json:"ticket"`
+	Project    domain.Project      `json:"project"`
+	Rounds     []domain.Round      `json:"rounds"`
+	Prototypes []domain.Prototype  `json:"prototypes"`
+	Proof      *domain.Proof       `json:"proof,omitempty"`
+	Links      []domain.TicketLink `json:"links"`
 	// Images are the ticket's current images; a run gets them as files in
 	// .ship/<goal>/images/.
 	Images []domain.TicketImage `json:"images"`
+	// linkDocs holds, by ticket id, the file each dependency and related
+	// ticket gets under .ship/<goal>/links/.
+	linkDocs map[int64]string
 }
 
 // ToolTicket returns the run's ticket, its rounds (with answers) and proof.
@@ -88,11 +92,15 @@ func (o *Orchestrator) ticketContext(ctx context.Context, id int64) (TicketConte
 	if err != nil {
 		return tc, err
 	}
+	links, err := o.st.TicketLinks(ctx, id)
+	if err != nil {
+		return tc, err
+	}
 	ims, err := o.st.TicketImages(ctx, id)
 	if err != nil {
 		return tc, err
 	}
-	tc = TicketContext{Ticket: t, Project: p, Rounds: rds, Prototypes: ps, Images: ims}
+	tc = TicketContext{Ticket: t, Project: p, Rounds: rds, Prototypes: ps, Links: links, Images: ims}
 	if proof, ok, err := o.st.LatestProof(ctx, id); err == nil && ok {
 		tc.Proof = &proof
 	}
