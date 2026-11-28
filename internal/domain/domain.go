@@ -339,6 +339,25 @@ type Artifact struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// TicketImage is an image the user attached to a ticket. N is its number on
+// the ticket; numbers are never reused, so removing image 2 of 3 leaves 1
+// and 3.
+type TicketImage struct {
+	N          int       `json:"n"`
+	ArtifactID string    `json:"artifactId"`
+	Name       string    `json:"name"`
+	MIME       string    `json:"mime"`
+	Size       int64     `json:"size"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// MaxTicketImages is how many images a ticket may have at once, and
+// MaxImageSize the largest image in bytes.
+const (
+	MaxTicketImages = 10
+	MaxImageSize    = 20 << 20
+)
+
 // Prototype is one option the user picks from.
 type Prototype struct {
 	Name        string            `json:"name"`

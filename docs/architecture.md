@@ -99,8 +99,10 @@ An answer is `{ "optionIds": [...], "text": "..." }`. A question is visible when
 | `GET /api/state`                               | bootstrap: projects, accounts summary, settings, models |
 | `GET/POST /api/projects`, `PATCH/DELETE /api/projects/{id}` | projects (repo `owner/name`, defaults)    |
 | `GET /api/projects/{id}/board`                 | tickets grouped by status                             |
-| `POST /api/projects/{id}/tickets`              | create from `{ idea, agent, model, effort, prototypes }` |
+| `POST /api/projects/{id}/uploads`              | store one image (multipart `file`) for a ticket about to be created; returns its id |
+| `POST /api/projects/{id}/tickets`              | create from `{ idea, agent, model, effort, prototypes, images: [upload ids] }` |
 | `GET/PATCH /api/tickets/{id}`                  | ticket detail; patch agent/model/effort/startAt       |
+| `POST /api/tickets/{id}/images`, `DELETE /api/tickets/{id}/images/{n}` | add (multipart `file`) / remove a ticket image |
 | `POST /api/tickets/{id}/start`                 | backlog → ready                                       |
 | `PUT /api/tickets/{id}/rounds/{n}/answers/{qid}` | save one answer; response says whether round completed |
 | `POST /api/tickets/{id}/message`               | send a message to the active run                      |

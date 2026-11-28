@@ -1,10 +1,12 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -482,6 +484,11 @@ func ensureDir(root *os.Root, rel string) error {
 // was there (a symlink included) is removed, and the file is created
 // exclusively so a link planted meanwhile is not followed.
 func writeNew(root *os.Root, rel string, data []byte) error {
+	return copyNew(root, rel, bytes.NewReader(data))
+}
+
+// copyNew is writeNew with the content read from src.
+func copyNew(root *os.Root, rel string, src io.Reader) error {
 	if err := ensureDir(root, filepath.Dir(rel)); err != nil {
 		return err
 	}
@@ -492,7 +499,7 @@ func writeNew(root *os.Root, rel string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
+	if _, err := io.Copy(f, src); err != nil {
 		f.Close()
 		return err
 	}

@@ -81,7 +81,10 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) error {
 	return ok(w, map[string]any{
 		"version": s.Version, "projects": projects, "accounts": accounts, "settings": settings,
 		"models": m, "efforts": efforts, "vapidPublicKey": vapid, "preview": s.Orch.Preview(),
-		"activeRuns": s.Orch.ActiveRuns(), "draining": s.Orch.Draining(),
+		// Agents listed here see images only with the listed models; every
+		// model of an agent not listed sees them.
+		"imageModels": map[domain.AgentKind][]string{domain.AgentPi: s.Orch.PiImageModels()},
+		"activeRuns":  s.Orch.ActiveRuns(), "draining": s.Orch.Draining(),
 		"statuses": domain.Statuses, "notifyEvents": domain.NotifyEvents,
 	})
 }
@@ -215,9 +218,15 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	files, err := s.Store.ProjectFiles(r.Context(), id)
+	if err != nil {
+		return err
+	}
 	if err := s.Store.DeleteProject(r.Context(), id); err != nil {
 		return err
 	}
+	// The rows cascade; the files (images, uploads, run artifacts) do not.
+	s.Orch.RemoveArtifactFiles(files...)
 	return ok(w, map[string]bool{"deleted": true})
 }
 
@@ -284,10 +293,23 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	out := map[string]any{"ticket": t, "rounds": rounds, "runs": runs, "prototypes": protos, "links": links}
+	images, err := s.Store.TicketImages(ctx, id)
+	if err != nil {
+		return err
+	}
+	out := map[string]any{"ticket": t, "rounds": rounds, "runs": runs, "prototypes": protos, "links": links, "images": images}
 	if proof, found, err := s.Store.LatestProof(ctx, id); err != nil {
 		return err
 	} else if found {
+		// Proofs stored before report images were linked at submit still
+		// point at checkout paths; match those to the proof's artifacts.
+		arts := make([]domain.Artifact, 0, len(proof.Files))
+		for _, id := range proof.Files {
+			if a, err := s.Store.Artifact(ctx, id); err == nil {
+				arts = append(arts, a)
+			}
+		}
+		proof.Report = orchestrator.ResolveProofImages(proof.Report, arts)
 		out["proof"] = proof
 	}
 	if pv := s.Orch.Preview(); pv != nil && pv.TicketID == id {

@@ -10,9 +10,10 @@
       "tool": "submit_proof",
       "args": {
         "verdict": "PASS",
-        "report_markdown": "# Verify\n\nGreeting present. PASS",
+        "report_markdown": "# Verify\n\nGreeting present. PASS\n\n| Before | After |\n| ------ | ----- |\n| ![screenshot](proof.png) | ![screenshot](gone.png) |",
         "files": [
-          "proof.png"
+          "proof.png",
+          "gone.png"
         ]
       }
     }

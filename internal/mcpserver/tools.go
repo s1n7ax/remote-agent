@@ -302,13 +302,24 @@ func (t *tools) submitProof(ctx context.Context, in proofIn) (any, error) {
 	if err := required("report_markdown", in.Report); err != nil {
 		return nil, err
 	}
+	// A file that cannot be read never blocks the proof: it is reported back
+	// and its image shows as unavailable on the ticket.
 	files := make([]string, 0, len(in.Files))
+	var skipped []string
 	for _, f := range in.Files {
 		path, err := resolveFile(t.run.Workdir, t.run.Root, f)
 		if err != nil {
-			return nil, err
+			skipped = append(skipped, err.Error())
+			continue
 		}
 		files = append(files, path)
 	}
-	return "proof attached", t.host.SubmitProof(ctx, t.run, Proof{Verdict: in.Verdict, Report: in.Report, Files: files})
+	notStored, err := t.host.SubmitProof(ctx, t.run, Proof{Verdict: in.Verdict, Report: in.Report, Files: files})
+	if err != nil {
+		return nil, err
+	}
+	if skipped = append(skipped, notStored...); len(skipped) > 0 {
+		return "proof attached; these files were not stored:\n" + strings.Join(skipped, "\n"), nil
+	}
+	return "proof attached", nil
 }

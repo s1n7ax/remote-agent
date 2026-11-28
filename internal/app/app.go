@@ -99,6 +99,7 @@ func Serve(ctx context.Context, cfg config.Config, spa fs.FS, version string, lo
 	}
 	orch := orchestrator.New(opts)
 	host.O = orch
+	go loadPiImageModels(ctx, cfg, orch, log)
 
 	auth, err := loadAuth(ctx, st, cfg.LoginTokenFile)
 	if err != nil {
@@ -207,4 +208,31 @@ func benchEnv(ctx context.Context, st *store.Store) ([]string, error) {
 		return []string{"PATH=" + os.Getenv("PATH"), "CLAUDE_CODE_OAUTH_TOKEN=" + tok}, nil
 	}
 	return nil, errors.New("no Claude account is available; add one or wait for a usage reset")
+}
+
+// loadPiImageModels asks pi's offline model catalog, once, which pi models
+// can look at images, in a sandbox without network when sandboxing is on.
+// Until it answers (or when it fails) every pi model counts as unable to.
+func loadPiImageModels(ctx context.Context, cfg config.Config, orch *orchestrator.Orchestrator, log *slog.Logger) {
+	dir := cfg.Path("pi-catalog")
+	_ = os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Warn("pi model catalog", "err", err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	var wrap func(argv, env []string) ([]string, []string)
+	if cfg.Sandbox {
+		wrap = sandbox.Config{
+			Bwrap: cfg.BwrapBin, Workdir: dir, ReadWrite: []string{dir},
+			ReadOnly: cfg.SandboxPaths, NoNetwork: true,
+		}.Wrap()
+	}
+	ms, err := pi.Runner{Bin: cfg.PiBin}.ImageModels(ctx, dir, wrap)
+	if err != nil {
+		log.Warn("pi model catalog; every pi model counts as unable to see images", "err", err)
+		return
+	}
+	orch.SetPiImageModels(ms)
+	log.Info("pi model catalog", "image_models", len(ms))
 }

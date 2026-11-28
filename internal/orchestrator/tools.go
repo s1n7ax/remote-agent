@@ -57,6 +57,9 @@ type TicketContext struct {
 	Prototypes []domain.Prototype  `json:"prototypes"`
 	Proof      *domain.Proof       `json:"proof,omitempty"`
 	Links      []domain.TicketLink `json:"links"`
+	// Images are the ticket's current images; a run gets them as files in
+	// .ship/<goal>/images/.
+	Images []domain.TicketImage `json:"images"`
 	// linkDocs holds, by ticket id, the file each dependency and related
 	// ticket gets under .ship/<goal>/links/.
 	linkDocs map[int64]string
@@ -93,7 +96,11 @@ func (o *Orchestrator) ticketContext(ctx context.Context, id int64) (TicketConte
 	if err != nil {
 		return tc, err
 	}
-	tc = TicketContext{Ticket: t, Project: p, Rounds: rds, Prototypes: ps, Links: links}
+	ims, err := o.st.TicketImages(ctx, id)
+	if err != nil {
+		return tc, err
+	}
+	tc = TicketContext{Ticket: t, Project: p, Rounds: rds, Prototypes: ps, Links: links, Images: ims}
 	if proof, ok, err := o.st.LatestProof(ctx, id); err == nil && ok {
 		tc.Proof = &proof
 	}
@@ -165,12 +172,7 @@ func (o *Orchestrator) ToolSubmitRequirement(ctx context.Context, runID int64, m
 	if err != nil {
 		return err
 	}
-	if t.Issue != 0 {
-		body := markdown + fmt.Sprintf("\n\n---\n_Original idea:_\n\n%s\n\n_Tracked by remote-agent (ticket %d)._", quote(t.Idea), t.ID)
-		if err := o.gh.UpdateIssueBody(ctx, ar.project.Repo, t.Issue, body); err != nil {
-			o.log.Warn("mirror requirement to issue", "err", err)
-		}
-	}
+	o.syncIssue(ctx, t)
 	return nil
 }
 
@@ -306,26 +308,44 @@ func (o *Orchestrator) ArtifactPath(id string) string {
 }
 
 // ToolSubmitProof stores the verify stage's evidence and posts it on the PR.
-func (o *Orchestrator) ToolSubmitProof(ctx context.Context, runID int64, verdict, report string, files []string) error {
+// A file that cannot be stored never blocks the proof: it is logged and
+// returned in skipped, and the report's reference to it stays unresolved.
+// Every image in the report that names a stored file is pointed at its
+// artifact. The PR comment stays text-only and links to the ticket's Proof tab.
+func (o *Orchestrator) ToolSubmitProof(ctx context.Context, runID int64, verdict, report string, files []string) (skipped []string, err error) {
 	ar, err := o.runByID(runID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	verdict = strings.ToUpper(strings.TrimSpace(verdict))
 	if verdict != "PASS" && verdict != "FAIL" {
-		return invalid("verdict must be PASS or FAIL")
+		return nil, invalid("verdict must be PASS or FAIL")
+	}
+	resolve := func(p string) string {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(ar.workdir, p)
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			return real
+		}
+		return filepath.Clean(p)
 	}
 	ids := []string{}
+	stored := map[string]string{}
 	for _, f := range files {
 		id, err := o.storeArtifact(ctx, ar, f)
 		if err != nil {
-			return err
+			o.log.Warn("store proof file", "file", f, "err", err)
+			skipped = append(skipped, fmt.Sprintf("%s: %v", f, err))
+			continue
 		}
 		ids = append(ids, id)
+		stored[resolve(f)] = id
 	}
-	proof, err := o.st.AddProof(ctx, domain.Proof{TicketID: ar.ticket.ID, RunID: ar.run.ID, Verdict: verdict, Report: report, Files: ids})
+	linked := linkProofImages(report, stored, resolve)
+	proof, err := o.st.AddProof(ctx, domain.Proof{TicketID: ar.ticket.ID, RunID: ar.run.ID, Verdict: verdict, Report: linked, Files: ids})
 	if err != nil {
-		return err
+		return skipped, err
 	}
 	ar.mu.Lock()
 	ar.proof = &proof
@@ -333,13 +353,13 @@ func (o *Orchestrator) ToolSubmitProof(ctx context.Context, runID int64, verdict
 	t, err := o.st.Ticket(ctx, ar.ticket.ID)
 	if err == nil && t.PR != 0 {
 		const marker = "<!-- remote-agent:proof -->"
-		body := fmt.Sprintf("%s\n## Verification: %s\n\n%s\n\n_%d screenshot(s) attached to the ticket in remote-agent._", marker, verdict, report, len(ids))
-		if err := o.gh.UpsertComment(ctx, ar.project.Repo, t.PR, marker, body); err != nil {
+		link := fmt.Sprintf("%s/#/p/%d/t/%d/proof", o.cfg.PublicURL, t.ProjectID, t.ID)
+		if err := o.gh.UpsertComment(ctx, ar.project.Repo, t.PR, marker, proofComment(marker, verdict, report, link)); err != nil {
 			o.log.Warn("post proof on PR", "err", err)
 		}
 	}
 	o.bus.Publish(Message{Type: "ticket", ProjectID: ar.ticket.ProjectID, TicketID: ar.ticket.ID, Data: t})
-	return nil
+	return skipped, nil
 }
 
 // currentBranch returns the branch checked out in the clone dir. The clone

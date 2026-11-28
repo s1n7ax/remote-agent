@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -397,14 +398,40 @@ func TestBuildCIVerifyToReview(t *testing.T) {
 		t.Fatalf("verified sha before verify = %q", v)
 	}
 	writeFile(t, filepath.Join(r.Info.Workdir, "shot.png"), "\x89PNG\r\n\x1a\n")
-	if err := h.o.ToolSubmitProof(h.ctx, r.ID(), "fail?", "x", nil); !errors.Is(err, ErrInvalid) {
+	if _, err := h.o.ToolSubmitProof(h.ctx, r.ID(), "fail?", "x", nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad verdict: err = %v", err)
 	}
-	if err := h.o.ToolSubmitProof(h.ctx, r.ID(), "pass", "all good", []string{"shot.png"}); err != nil {
-		t.Fatal(err)
+	writeFile(t, filepath.Join(r.Info.Workdir, ".ship", "g", "verify", "1-after.png"), "\x89PNG\r\n\x1a\n")
+	report := "all good\n\n| Before | After |\n| - | - |\n| ![screenshot](shot.png) | ![screenshot](.ship/g/verify/1-after.png) |\n\n![gone](missing.png)"
+	skipped, err := h.o.ToolSubmitProof(h.ctx, r.ID(), "pass", report, []string{"shot.png", ".ship/g/verify/1-after.png", "missing.png"})
+	if err != nil || len(skipped) != 1 || !strings.Contains(skipped[0], "missing.png") {
+		t.Fatalf("submit proof: skipped=%v err=%v", skipped, err)
 	}
-	if len(h.gh.commentsOn(n)) != 1 {
+	proof, _, _ := h.st.LatestProof(h.ctx, tk.ID)
+	if len(proof.Files) != 2 {
+		t.Fatalf("proof files = %v, want 2", proof.Files)
+	}
+	for i, id := range proof.Files {
+		if !strings.Contains(proof.Report, "![screenshot](/api/artifacts/"+id+")") {
+			t.Errorf("file %d not linked to its artifact in %q", i, proof.Report)
+		}
+	}
+	if !strings.Contains(proof.Report, "![gone](missing.png)") {
+		t.Errorf("unstored file's reference changed: %q", proof.Report)
+	}
+	comments := h.gh.commentsOn(n)
+	if len(comments) != 1 {
 		t.Fatal("proof not posted on the PR")
+	}
+	body := comments[0].Body
+	if strings.Contains(body, "![") || strings.Contains(body, "/api/artifacts/") || strings.Contains(body, ".ship/") {
+		t.Errorf("PR proof comment has image references: %q", body)
+	}
+	if want := fmt.Sprintf("(http://test/#/p/%d/t/%d/proof)", h.project.ID, tk.ID); !strings.Contains(body, want) {
+		t.Errorf("PR proof comment lacks the Proof tab link %s: %q", want, body)
+	}
+	if !strings.Contains(body, "_screenshot: 1-after.png_") {
+		t.Errorf("PR proof comment lacks the screenshot's name: %q", body)
 	}
 	if err := h.o.ToolStageDone(h.ctx, r.ID(), "verified"); err != nil {
 		t.Fatal(err)
@@ -548,7 +575,7 @@ func TestOnlyUserMerges(t *testing.T) {
 		"ToolCILogs":         func() error { _, err := h.o.ToolCILogs(ctx, id, "", 0); return err },
 		"ToolListPulls":      func() error { _, err := h.o.ToolListPulls(ctx, id); return err },
 		"ToolComment":        func() error { return h.o.ToolComment(ctx, id, "hi", 0) },
-		"ToolSubmitProof":    func() error { return h.o.ToolSubmitProof(ctx, id, "PASS", "ok", []string{"shot.png"}) },
+		"ToolSubmitProof":    func() error { _, err := h.o.ToolSubmitProof(ctx, id, "PASS", "ok", []string{"shot.png"}); return err },
 		"ToolStartPreview":   func() error { _, err := h.o.ToolStartPreview(ctx, id, "", "true", 65000); return err },
 		"ToolRepo":           func() error { _, err := h.o.ToolRepo(id); return err },
 		"ToolStageDone":      func() error { return h.o.ToolStageDone(ctx, id, "built") },
@@ -843,11 +870,13 @@ func TestUploadArtifactRejectsEscapes(t *testing.T) {
 			t.Errorf("upload %s: id=%q err=%v, want ErrInvalid", p, id, err)
 		}
 	}
-	if err := h.o.ToolSubmitProof(h.ctx, r.ID(), "PASS", "ok", []string{"leak"}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("proof with a leaking file: err = %v", err)
+	// A rejected file never blocks the proof, and is never stored.
+	skipped, err := h.o.ToolSubmitProof(h.ctx, r.ID(), "PASS", "ok", []string{"leak"})
+	if err != nil || len(skipped) != 1 {
+		t.Fatalf("proof with a leaking file: skipped=%v err=%v", skipped, err)
 	}
-	if _, ok, _ := h.st.LatestProof(h.ctx, r.Info.TicketID); ok {
-		t.Fatal("proof stored despite the rejected file")
+	if p, ok, _ := h.st.LatestProof(h.ctx, r.Info.TicketID); !ok || len(p.Files) != 0 {
+		t.Fatalf("proof with a leaking file: stored=%v files=%v, want stored with no files", ok, p.Files)
 	}
 	if _, err := h.o.ToolUploadArtifact(h.ctx, r.ID(), "."); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("directory upload: err = %v", err)

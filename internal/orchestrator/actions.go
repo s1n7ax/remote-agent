@@ -9,6 +9,7 @@ import (
 
 	"github.com/s1n7ax/remote-agent/internal/domain"
 	"github.com/s1n7ax/remote-agent/internal/questions"
+	"github.com/s1n7ax/remote-agent/internal/store"
 )
 
 // ErrInvalid wraps a request the user (or agent) got wrong.
@@ -28,6 +29,8 @@ type NewTicket struct {
 	Prototypes bool             `json:"prototypes"`
 	Start      bool             `json:"start"`
 	StartAt    *time.Time       `json:"startAt"`
+	// Images are upload ids (UploadImage), attached as images 1..n.
+	Images []string `json:"images"`
 	// DependsOn and Related are tickets of the same project to link the
 	// new ticket to.
 	DependsOn []int64 `json:"dependsOn"`
@@ -89,15 +92,22 @@ func (o *Orchestrator) CreateTicket(ctx context.Context, projectID int64, in New
 	if t.Agent == "" {
 		t.Agent, t.Model, t.Effort = p.Agent, p.Model, p.Effort
 	}
-	t, err = o.st.CreateTicket(ctx, t)
+	// The images go in with the ticket, so its first run never starts
+	// without them.
+	t, err = o.st.CreateTicketWithImages(ctx, t, in.Images)
+	switch {
+	case errors.Is(err, store.ErrTooManyImages):
+		return domain.Ticket{}, invalid("%v", err)
+	case errors.Is(err, store.ErrNotFound):
+		return t, invalid("an image upload is missing or expired; add the image again")
+	}
 	if err != nil {
 		return t, err
 	}
 	if err := o.addNewLinks(ctx, t, links); err != nil {
 		return t, err
 	}
-	body := t.Idea + fmt.Sprintf("\n\n---\n_Tracked by remote-agent (ticket %d)._", t.ID)
-	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, body); err != nil {
+	if n, err := o.gh.CreateIssue(ctx, p.Repo, t.Title, issueBody(t, len(in.Images))); err != nil {
 		o.log.Warn("create issue", "ticket", t.ID, "err", err)
 		t.StatusNote = "could not create the GitHub issue: " + err.Error()
 	} else {
@@ -439,6 +449,7 @@ func (o *Orchestrator) DeleteTicket(ctx context.Context, id int64) error {
 		return err
 	}
 	o.removeWorkspace(ctx, t)
+	o.removeImageFiles(ctx, id)
 	// Under linkMu, so no link to the ticket is added while it goes.
 	o.linkMu.Lock()
 	err = o.st.DeleteTicket(ctx, id)
