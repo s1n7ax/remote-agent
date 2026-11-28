@@ -69,8 +69,9 @@ type Host interface {
 	// StartPreview starts (or restarts) a preview server and returns the URL
 	// the user opens.
 	StartPreview(ctx context.Context, run Run, p Preview) (url string, err error)
-	// SubmitProof attaches test evidence to the ticket.
-	SubmitProof(ctx context.Context, run Run, p Proof) error
+	// SubmitProof attaches test evidence to the ticket. A file that cannot
+	// be stored does not fail it; skipped lists each such file and why.
+	SubmitProof(ctx context.Context, run Run, p Proof) (skipped []string, err error)
 	// UploadArtifact stores the file at path (absolute, inside Workdir).
 	UploadArtifact(ctx context.Context, run Run, path string) (domain.Artifact, error)
 	// PushBranch pushes the ticket's goal branch (never the default branch).

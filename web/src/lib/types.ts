@@ -281,6 +281,8 @@ export interface AppState {
   settings: Settings;
   models: Partial<Record<AgentKind, string[]>>;
   efforts: Partial<Record<AgentKind, string[]>>;
+  /** Agents listed here see images only with the listed models; every model of an unlisted agent sees them. */
+  imageModels?: Partial<Record<AgentKind, string[] | null>>;
   vapidPublicKey: string;
   preview: PreviewInfo | null;
   activeRuns: number;
@@ -336,12 +338,23 @@ export interface GitHubView {
   ticketsByPr: Record<string, number>;
 }
 
+/** An image attached to a ticket; `n` is its number on the ticket (never reused). */
+export interface TicketImage {
+  n: number;
+  artifactId: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+}
+
 /** GET /api/tickets/{id}. */
 export interface TicketDetail {
   ticket: Ticket;
   rounds: Round[];
   runs: Run[];
   prototypes: Prototype[];
+  images: TicketImage[];
   proof?: Proof;
   preview?: PreviewInfo;
 }
@@ -400,6 +413,8 @@ export interface TicketInput {
   prototypes: boolean;
   start?: boolean;
   startAt?: string;
+  /** Upload ids (api.uploadImage), attached as images 1..n. */
+  images?: string[];
 }
 
 export interface TicketPatch {
