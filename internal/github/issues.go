@@ -40,6 +40,8 @@ type IssueUpdate struct {
 	Title *string `json:"title,omitempty"`
 	Body  *string `json:"body,omitempty"`
 	State *string `json:"state,omitempty"` // open | closed
+	// StateReason is completed | not_planned | reopened.
+	StateReason *string `json:"state_reason,omitempty"`
 }
 
 // Comment is an issue or pull request conversation comment.

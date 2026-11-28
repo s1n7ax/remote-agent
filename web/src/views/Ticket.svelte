@@ -25,6 +25,8 @@
   let busy = $state(false);
   let scheduling = $state(false);
   let when = $state('');
+  let closing = $state(false);
+  let reason = $state('');
 
   async function load() {
     try {
@@ -59,6 +61,7 @@
 
   const t = $derived(detail?.ticket);
   const live = $derived(detail?.runs.filter((r) => ['queued', 'running', 'paused'].includes(r.status)).at(-1));
+  const running = $derived(!!live || detail?.ticket.status === 'working');
   const openRound = $derived(detail?.rounds.find((r) => !r.completedAt));
   const openProg = $derived(openRound ? progress(openRound.tree, openRound.answers) : null);
 
@@ -137,6 +140,16 @@
     scheduling = false;
   }
 
+  function openWontDo() {
+    reason = '';
+    closing = true;
+  }
+
+  async function wontDo() {
+    await act(() => api.wontDo(ticketId, reason), "Closed as won't do");
+    closing = false;
+  }
+
   function onsaved(r: Round, tk: Ticket) {
     if (!detail) return;
     const i = detail.rounds.findIndex((x) => x.n === r.n);
@@ -156,6 +169,7 @@
       <h1>{t.title}</h1>
       <div class="row wrap status">
         <span class="pill"><span class="lamp"></span>{STATUS_LABEL[t.status]}</span>
+        {#if t.wontDoAt}<span class="badge wontdo">won't do</span>{/if}
         <span class="badge">{t.kind === 'job' ? 'job' : `stage: ${t.stage}`}</span>
         {#if t.issue}<a class="badge" href="https://github.com/{project.repo}/issues/{t.issue}" target="_blank" rel="noopener noreferrer">issue #{t.issue}</a>{/if}
         {#if t.agent === 'pi'}<span class="badge">{usd(t.spendUsd)}{t.spendCapUsd > 0 ? ` of ${usd(t.spendCapUsd)}` : ' spent'}</span>{/if}
@@ -165,7 +179,11 @@
       {:else if t.startAt && t.status === 'backlog'}
         <p class="note">Scheduled to start {clock(t.startAt)} ({relative(t.startAt)}).</p>
       {/if}
-      {#if t.statusNote}<p class={['note', { bad: t.status === 'failed' }]}>{t.statusNote}</p>{/if}
+      {#if t.wontDoAt}
+        <p class="note">Closed as won't do {relative(t.wontDoAt)}{t.wontDoReason ? ':' : '.'}</p>
+        {#if t.wontDoReason}<p class="reason">{t.wontDoReason}</p>{/if}
+      {/if}
+      {#if t.statusNote && !(t.wontDoAt && t.statusNote === "won't do")}<p class={['note', { bad: t.status === 'failed' }]}>{t.statusNote}</p>{/if}
     </header>
 
     <section class="panel controls">
@@ -189,6 +207,12 @@
         {/if}
         {#if t.status === 'failed'}
           <button class="btn primary" type="button" disabled={busy} onclick={() => act(() => api.retry(ticketId), 'Retrying')}><Icon name="retry" size={16} /> Retry</button>
+        {/if}
+        {#if t.status !== 'done'}
+          <button class="btn ghost" type="button" disabled={busy} onclick={openWontDo}>Won't do</button>
+        {/if}
+        {#if t.wontDoAt}
+          <button class="btn primary" type="button" disabled={busy} onclick={() => act(() => api.reopen(ticketId), 'Reopened')}><Icon name="retry" size={16} /> Reopen</button>
         {/if}
       </div>
     </section>
@@ -250,6 +274,19 @@
       <button class="btn primary grow" type="button" disabled={!when || busy} onclick={() => schedule()}>Schedule</button>
     {/snippet}
   </Sheet>
+
+  <Sheet bind:open={closing} title="Close as won't do">
+    <p class="small">
+      The ticket moves to Done, marked won't do. Its GitHub issue closes as not planned{t?.pr ? `, PR #${t.pr} closes without merging` : ''} and open
+      questions are dropped. Reopen brings it back where it left off.
+    </p>
+    {#if running}<p class="warn">A run is active on this ticket. It will be stopped.</p>{/if}
+    <label class="field">Reason (optional) <textarea bind:value={reason} rows="3" placeholder="Shown on the ticket and posted to the issue"></textarea></label>
+    {#snippet footer()}
+      <button class="btn" type="button" onclick={() => (closing = false)}>Cancel</button>
+      <button class="btn danger grow" type="button" disabled={busy} onclick={wontDo}>{running ? 'Stop the run and close' : "Close as won't do"}</button>
+    {/snippet}
+  </Sheet>
 {/if}
 
 <style>
@@ -288,6 +325,18 @@
   }
   .note.bad {
     color: var(--bad);
+  }
+  .reason {
+    white-space: pre-wrap;
+    padding-left: 10px;
+    border-left: 3px solid var(--line);
+  }
+  .badge.wontdo {
+    font-weight: 600;
+  }
+  .warn {
+    color: var(--bad);
+    font-weight: 500;
   }
   .controls {
     gap: 14px;

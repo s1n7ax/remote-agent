@@ -76,6 +76,15 @@ func (o *Orchestrator) settle(ctx context.Context, ar *activeRun, final agent.Ev
 		o.log.Error("settle: load ticket", "err", err)
 		return
 	}
+	if t.WontDo() {
+		// Closed as won't do while the run was going: it stays in done, and
+		// a round the run posted meanwhile is cancelled like the others.
+		if err := o.cancelOpenRounds(ctx, t.ID); err != nil {
+			o.log.Error("settle: cancel rounds of a won't-do ticket", "err", err)
+		}
+		o.bus.Publish(Message{Type: "ticket", ProjectID: t.ProjectID, TicketID: t.ID, Data: t})
+		return
+	}
 	switch {
 	case shutdown:
 		t.Status = domain.StatusReady

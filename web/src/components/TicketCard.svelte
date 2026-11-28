@@ -16,6 +16,7 @@
   {/if}
   <h3>{t.title}</h3>
   <div class="meta">
+    {#if t.wontDoAt}<span class="badge wontdo">won't do</span>{/if}
     <span class="badge">{t.kind === 'job' ? 'job' : t.stage}</span>
     <span class="badge">{app.modelLabel(t.agent, t.model)} · {t.effort}</span>
     {#if t.agent !== 'claude'}<span class="badge">{app.agent(t.agent)?.label ?? t.agent}</span>{/if}
@@ -65,6 +66,9 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+  }
+  .badge.wontdo {
+    font-weight: 600;
   }
   .note {
     font-size: 0.82rem;

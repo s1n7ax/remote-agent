@@ -239,22 +239,28 @@ func (o *Orchestrator) releaseTimers(ctx context.Context) error {
 	for _, polled := range ts {
 		// Decided on the current row: the user may have changed the ticket
 		// since the list was read.
-		_, err := o.update(ctx, polled.ID, func(t *domain.Ticket) error {
+		t, err := o.update(ctx, polled.ID, func(t *domain.Ticket) error {
 			switch {
 			case t.Status == domain.StatusBacklog && t.StartAt != nil && !t.StartAt.After(now):
 				t.StartAt = nil
-				t.StatusNote = "started on schedule"
+				queueStart(t)
+				if t.Status == domain.StatusReady {
+					t.StatusNote = "started on schedule"
+				}
 			case t.Status == domain.StatusWaiting && t.Stage != domain.StageCI && t.WaitUntil != nil && !t.WaitUntil.After(now):
 				t.WaitUntil = nil
 				t.StatusNote = "usage limit reset"
+				t.Status = domain.StatusReady
 			default:
 				return errUnchanged
 			}
-			t.Status = domain.StatusReady
 			return nil
 		})
 		if err != nil && !errors.Is(err, errUnchanged) {
 			return err
+		}
+		if err == nil && t.Status == domain.StatusWaiting {
+			o.RecheckCI(t.ID)
 		}
 	}
 	return nil

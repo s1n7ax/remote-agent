@@ -92,6 +92,8 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/tickets/{id}/pause", s.ticketAction("pause"))
 	h("POST /api/tickets/{id}/resume", s.ticketAction("resume"))
 	h("POST /api/tickets/{id}/stop", s.ticketAction("stop"))
+	h("POST /api/tickets/{id}/wont-do", s.wontDo)
+	h("POST /api/tickets/{id}/reopen", s.ticketAction("reopen"))
 	h("POST /api/tickets/{id}/message", s.message)
 	h("PUT /api/tickets/{id}/rounds/{n}/answers/{qid}", s.answer)
 	h("POST /api/tickets/{id}/rounds/{n}/submit", s.submitRound)

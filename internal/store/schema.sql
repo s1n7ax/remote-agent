@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS tickets (
 	spend_cap_usd REAL NOT NULL DEFAULT 0,
 	job_prompt TEXT NOT NULL DEFAULT '',
 	prototypes_json TEXT NOT NULL DEFAULT '[]',
+	wont_do_at TIMESTAMP,
+	wont_do_reason TEXT NOT NULL DEFAULT '',
+	wont_do_closed_issue INTEGER NOT NULL DEFAULT 0,
+	wont_do_closed_pr INTEGER NOT NULL DEFAULT 0,
 	created_at TIMESTAMP NOT NULL,
 	updated_at TIMESTAMP NOT NULL
 );

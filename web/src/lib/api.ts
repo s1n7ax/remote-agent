@@ -135,6 +135,8 @@ export const api = {
   resume: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/resume`),
   stop: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/stop`),
   retry: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/retry`),
+  wontDo: (id: number, reason: string) => call<Ticket>('POST', `/api/tickets/${id}/wont-do`, { reason }),
+  reopen: (id: number) => call<Ticket>('POST', `/api/tickets/${id}/reopen`),
   answer: (id: number, round: number, qid: string, a: Answer) =>
     call<AnswerResult>('PUT', `/api/tickets/${id}/rounds/${round}/answers/${e(qid)}`, a),
   /** Completes a fully answered round: its answers lock and the next run starts. */

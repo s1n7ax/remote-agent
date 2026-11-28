@@ -84,6 +84,9 @@ func (o *Orchestrator) addCost(ctx context.Context, ar *activeRun, usd float64) 
 
 // askSpendCap posts the spend-cap question and parks the ticket.
 func (o *Orchestrator) askSpendCap(ctx context.Context, t domain.Ticket, reason string) error {
+	if cur, err := o.st.Ticket(ctx, t.ID); err != nil || cur.WontDo() {
+		return err // closed as won't do: no more questions
+	}
 	tree := domain.QuestionTree{
 		Title: "Spend cap reached",
 		Intro: "The run paused because " + reason + ".",

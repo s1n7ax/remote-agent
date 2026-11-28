@@ -34,6 +34,7 @@ type issue struct {
 	Title       string    `json:"title"`
 	Body        string    `json:"body"`
 	State       string    `json:"state"`
+	StateReason string    `json:"state_reason,omitempty"`
 	HTMLURL     string    `json:"html_url"`
 	User        user      `json:"user"`
 	Labels      []any     `json:"labels"`
@@ -287,6 +288,9 @@ func (s *server) api(w http.ResponseWriter, r *http.Request) {
 			if v, ok := body["state"].(string); ok {
 				is.State = v
 			}
+			if v, ok := body["state_reason"].(string); ok {
+				is.StateReason = v
+			}
 			is.UpdatedAt = now
 		}
 		writeJSON(w, http.StatusOK, is)
@@ -362,6 +366,13 @@ func (s *server) api(w http.ResponseWriter, r *http.Request) {
 			}
 			if v, ok := body["title"].(string); ok {
 				p.Title = v
+			}
+			if v, ok := body["state"].(string); ok {
+				if p.Merged {
+					writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "merged pull requests cannot change state"})
+					return
+				}
+				p.State = v
 			}
 			p.UpdatedAt = now
 		}

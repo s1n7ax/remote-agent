@@ -152,16 +152,31 @@ func (o *Orchestrator) StartTicket(ctx context.Context, id int64) (domain.Ticket
 		if t.Status != domain.StatusBacklog && t.Status != domain.StatusFailed {
 			return invalid("ticket is %s; only backlog or failed tickets can be started", t.Status)
 		}
-		t.Status = domain.StatusReady
 		t.StartAt = nil
 		t.StatusNote = ""
+		queueStart(t)
 		return nil
 	})
 	if err != nil {
 		return t, err
 	}
+	if t.Status == domain.StatusWaiting {
+		o.RecheckCI(t.ID)
+	}
 	o.Kick()
 	return t, nil
+}
+
+// queueStart moves a ticket that is being started to ready, or to waiting
+// for CI when it has a PR and stopped at CI or verify (a reopened ticket,
+// say): CI then sends it to testing or review.
+func queueStart(t *domain.Ticket) {
+	if t.PR != 0 && (t.Stage == domain.StageCI || t.Stage == domain.StageVerify) {
+		t.Stage, t.Status = domain.StageCI, domain.StatusWaiting
+		t.StatusNote = "waiting for CI"
+		return
+	}
+	t.Status = domain.StatusReady
 }
 
 // RetryTicket re-runs a failed ticket's stage (resetting fix rounds when it
@@ -211,6 +226,13 @@ func (o *Orchestrator) Answer(ctx context.Context, ticketID int64, n int, qid st
 	if err != nil {
 		return res, err
 	}
+	t, err := o.st.Ticket(ctx, ticketID)
+	if err != nil {
+		return res, err
+	}
+	if t.WontDo() {
+		return res, invalid("the ticket is closed as won't do; reopen it first")
+	}
 	if rd.CompletedAt != nil {
 		return res, invalid("round %d is already complete", n)
 	}
@@ -230,10 +252,6 @@ func (o *Orchestrator) Answer(ctx context.Context, ticketID int64, n int, qid st
 		delete(rd.Answers, qid)
 	} else {
 		rd.Answers[qid] = a
-	}
-	t, err := o.st.Ticket(ctx, ticketID)
-	if err != nil {
-		return res, err
 	}
 	if err := o.st.SaveRound(ctx, rd); err != nil {
 		return res, err
@@ -278,6 +296,9 @@ func (o *Orchestrator) submitLocked(ctx context.Context, ticketID int64, n int) 
 	t, err := o.st.Ticket(ctx, ticketID)
 	if err != nil {
 		return res, err
+	}
+	if t.WontDo() {
+		return res, invalid("the ticket is closed as won't do; reopen it first")
 	}
 	now := o.now()
 	rd.CompletedAt = &now

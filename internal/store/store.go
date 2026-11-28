@@ -49,6 +49,10 @@ func Open(path string) (*Store, error) {
 var addedColumns = []struct{ table, column, def string }{
 	{"projects", "run_timeout_minutes", "INTEGER NOT NULL DEFAULT 0"},
 	{"tickets", "fix_trigger", "TEXT NOT NULL DEFAULT ''"},
+	{"tickets", "wont_do_at", "TIMESTAMP"},
+	{"tickets", "wont_do_reason", "TEXT NOT NULL DEFAULT ''"},
+	{"tickets", "wont_do_closed_issue", "INTEGER NOT NULL DEFAULT 0"},
+	{"tickets", "wont_do_closed_pr", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // addColumns adds every column of addedColumns that its table lacks.

@@ -127,6 +127,48 @@ test('one tap removes a skill and Undo brings it back', async ({ page, request }
   expect(await names()).toContain('todo-comments');
 });
 
+test("won't do closes a ticket and its issue, and Reopen brings it back", async ({ page, request }) => {
+  await page.goto(`/#/login?token=${token}`);
+  const projects = (await (await request.get('/api/projects', { headers })).json()) as { id: number; repo: string }[];
+  let project = projects.find((p) => p.repo === 'e2e/demo');
+  if (!project) project = await (await request.post('/api/projects', { headers, data: { repo: 'e2e/demo', agent: 'fake' } })).json();
+  const created = await (await request.post(`/api/projects/${project!.id}/tickets`, { headers, data: { idea: 'Translate the README', agent: 'fake' } })).json();
+  const id: number = created.id;
+  expect(created.issue).toBeGreaterThan(0);
+
+  await page.goto(`/#/p/${project!.id}/t/${id}/requirement`);
+  // Cancelling changes nothing.
+  await page.getByRole('button', { name: "Won't do", exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: "Close as won't do" });
+  await expect(sheet.getByText('Reason (optional)')).toBeVisible();
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  expect((await ticket(request, id)).status).toBe('backlog');
+
+  await page.getByRole('button', { name: "Won't do", exact: true }).click();
+  await sheet.getByRole('textbox').fill('Nobody reads translations');
+  await sheet.getByRole('button', { name: "Close as won't do" }).click();
+  await expect.poll(async () => (await ticket(request, id)).status).toBe('done');
+  await expect(page.locator('.badge', { hasText: "won't do" })).toBeVisible();
+  await expect(page.getByText('Nobody reads translations')).toBeVisible();
+  await expect(page.getByRole('button', { name: "Won't do", exact: true })).toHaveCount(0);
+
+  const gh = await github(request);
+  expect(gh.issues[created.issue].state).toBe('closed');
+  expect(gh.issues[created.issue].state_reason).toBe('not_planned');
+  expect(gh.comments.some((c: { issue: number; body: string }) => c.issue === created.issue && c.body.includes('Nobody reads translations'))).toBe(true);
+
+  await page.goto(`/#/p/${project!.id}/board`);
+  await expect(page.getByRole('link', { name: /Translate the README/ }).getByText("won't do")).toBeAttached();
+
+  await page.goto(`/#/p/${project!.id}/t/${id}/requirement`);
+  await page.getByRole('button', { name: 'Reopen', exact: true }).click();
+  await expect.poll(async () => (await ticket(request, id)).status).toBe('backlog');
+  const t = await ticket(request, id);
+  expect(t.stage).toBe('explore');
+  expect(t.wontDoAt).toBeUndefined();
+  expect((await github(request)).issues[created.issue].state).toBe('open');
+});
+
 // Runs after the tests above, which add the e2e/demo project.
 test('images go on a ticket and stay on the board', async ({ page, request }) => {
   const projects = (await (await request.get('/api/projects', { headers })).json()) as { id: number; repo: string }[];

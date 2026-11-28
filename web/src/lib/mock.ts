@@ -189,6 +189,17 @@ const tickets: Ticket[] = [
   }),
   ticket({ id: 109, title: 'Initial board view', status: 'done', stage: 'merged', issue: 12, pr: 20 }),
   ticket({
+    id: 112,
+    title: 'Offline mode for the board',
+    status: 'done',
+    stage: 'design',
+    issue: 13,
+    wontDoAt: ago(60 * 26),
+    wontDoReason: 'Superseded by the PWA cache work.',
+    wontDoClosedIssue: true,
+    statusNote: "won't do",
+  }),
+  ticket({
     id: 110,
     title: 'Nightly: resolve PR merge conflicts',
     kind: 'job',
@@ -735,8 +746,36 @@ on('POST', '/api/tickets/(\\d+)/(start|pause|resume|stop|retry)', (m) => {
   touch(t);
   return t;
 });
+on('POST', '/api/tickets/(\\d+)/wont-do', (m, b: { reason?: string }) => {
+  const t = find(tickets, (x) => x.id === +m[1], 'ticket');
+  if (t.status === 'done') throw new ApiError(400, 'invalid request: ticket is done');
+  const run = activeRun(t.id);
+  if (run) run.status = 'stopped';
+  for (const r of rounds) if (r.ticketId === t.id && !r.completedAt) r.completedAt = new Date().toISOString();
+  t.status = 'done';
+  t.wontDoAt = new Date().toISOString();
+  t.wontDoReason = b?.reason?.trim() || undefined;
+  t.wontDoClosedIssue = !!t.issue;
+  t.wontDoClosedPr = !!t.pr;
+  t.statusNote = "won't do";
+  touch(t);
+  return t;
+});
+on('POST', '/api/tickets/(\\d+)/reopen', (m) => {
+  const t = find(tickets, (x) => x.id === +m[1], 'ticket');
+  if (!t.wontDoAt) throw new ApiError(400, "invalid request: only a won't-do ticket can be reopened");
+  t.status = 'backlog';
+  delete t.wontDoAt;
+  delete t.wontDoReason;
+  delete t.wontDoClosedIssue;
+  delete t.wontDoClosedPr;
+  t.statusNote = 'reopened';
+  touch(t);
+  return t;
+});
 on('PUT', '/api/tickets/(\\d+)/rounds/(\\d+)/answers/([^/]+)', (m, b: Answer) => {
   const t = find(tickets, (x) => x.id === +m[1], 'ticket');
+  if (t.wontDoAt) throw new ApiError(400, "invalid request: the ticket is closed as won't do; reopen it first");
   const r = find(rounds, (x) => x.ticketId === t.id && x.n === +m[2], 'round');
   if (r.completedAt) throw new ApiError(400, `invalid request: round ${r.n} is already complete`);
   const qid = decodeURIComponent(m[3]);
